@@ -133,4 +133,4 @@ outputs/
 tex_tables/
 ckpt/
 *.npz
-*.pth
+*.pthckpt/
