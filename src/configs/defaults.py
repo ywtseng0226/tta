@@ -21,7 +21,6 @@ _C.CORRUPTION.SEVERITY = [5, 4, 3, 2, 1]
 _C.CORRUPTION.NUM_EX = 10000
 _C.CORRUPTION.NUM_CLASS = -1
 _C.CORRUPTION.RECUR = 10
-_C.CORRUPTION.CGS = False
 _C.CORRUPTION.ORDER_FILE = None
 # ----------------------------- Input options -------------------------- #
 _C.INPUT = CN()
@@ -36,7 +35,6 @@ _C.LOADER.SAMPLER = CN()
 _C.LOADER.SAMPLER.TYPE = "sequence"
 _C.LOADER.SAMPLER.GAMMA = 0.1
 _C.LOADER.SAMPLER.N_EPISODE = 10
-_C.LOADER.SAMPLER.MIX_RATIO = 0.6
 _C.LOADER.NUM_WORKS = 2
 # ------------------------------- Batch norm options ------------------------ #
 _C.BN = CN()
@@ -72,7 +70,7 @@ _C.DEBUG = 0
 
 # tta method specific
 _C.ADAPTER = CN()
-_C.ADAPTER.NAME = "petta"
+_C.ADAPTER.NAME = "mytta"
 
 # RoTTA
 _C.ADAPTER.RoTTA = CN()
@@ -95,6 +93,19 @@ _C.ADAPTER.PETTA.ADAPTIVE_ALPHA = False
 
 _C.ADAPTER.PETTA.NORM_LAYER = "rbn"
 _C.ADAPTER.PETTA.LOSS_FUNC = "sce"
+
+# 添加 MYTTA 子配置
+_C.ADAPTER.MYTTA = CN()
+_C.ADAPTER.MYTTA.MAX_MEMORY_BANKS = 5
+_C.ADAPTER.MYTTA.DOMAIN_THRESHOLD = 1.0
+_C.ADAPTER.MYTTA.BETA = 0.5
+_C.ADAPTER.MYTTA.ALPHA_0 = 0.001
+_C.ADAPTER.MYTTA.LAMBDA_0 = 10.0
+_C.ADAPTER.MYTTA.REGULARIZER = "cosine"
+_C.ADAPTER.MYTTA.ADAPTIVE_LAMBDA = True
+_C.ADAPTER.MYTTA.ADAPTIVE_ALPHA = True
+_C.ADAPTER.MYTTA.NORM_LAYER = "rbn"
+_C.ADAPTER.MYTTA.ANCHOR_WGT = 1.0
 
 # Percentage of source samples used
 _C.ADAPTER.PETTA.PERCENTAGE = 1.0   # [0, 1] possibility to reduce the number of source samples

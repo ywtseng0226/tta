@@ -12,12 +12,12 @@ INPUT:
   SIZE: (32, 32)
 
 ADAPTER:
-  NAME: petta
+  NAME: mytta
 
   RoTTA:
     MEMORY_SIZE: 64
     UPDATE_FREQUENCY: 64
-    
+  
   PETTA:
     ALPHA_0: 0.001
     LAMBDA_0: 10.0
@@ -25,11 +25,19 @@ ADAPTER:
     ADAPTIVE_LAMBDA: True
     ADAPTIVE_ALPHA: True
     NORM_LAYER: "rbn"
+  
+  MYTTA:
+    MAX_MEMORY_BANKS: 5
+    DOMAIN_THRESHOLD: 1.0
+    BETA: 0.5
+    ALPHA_0: 0.001
+    LAMBDA_0: 10.0
+    REGULARIZER: "cosine"
+    ADAPTIVE_LAMBDA: True
+    ADAPTIVE_ALPHA: True
+    NORM_LAYER: "rbn"
+    ANCHOR_WGT: 1.0
     
 LOADER:
   SAMPLER:
     TYPE: "class_temporal"
-    GAMMA: 0.01
-
-
-    

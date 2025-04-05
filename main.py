@@ -38,7 +38,7 @@ def recurring_test_time_adaptation(cfg):
     for batch_id, data_package in enumerate(tbar):
         data, label, domain = data_package["image"], data_package['label'], data_package['domain']
         
-        if len(label) == 1: 
+        if len(label) == 1:
             continue  # ignore the final single point
         
         data, label = data.cuda(), label.cuda()
@@ -50,7 +50,7 @@ def recurring_test_time_adaptation(cfg):
         predict = torch.argmax(output, dim=1)
         accurate = (predict == label)
         processor.process(accurate, domain)
-
+        
         tbar.set_postfix(acc=processor.cumulative_acc())
 
     labels_arr = np.concatenate(labels_arr, axis=0)

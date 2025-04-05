@@ -17,11 +17,12 @@ def build_loader(cfg, ds_name, all_corruptions, all_severity):
         dataset_class = ImageNetC
     else:
         raise NotImplementedError(f"Not Implement for dataset: {cfg.CORRUPTION.DATASET}")
-    
-    ds = dataset_class(cfg, all_corruptions, all_severity)
 
+    ds = dataset_class(cfg, all_corruptions, all_severity)
     sampler = build_sampler(cfg, ds.data_source)
+
     loader = DataLoader(ds, cfg.TEST.BATCH_SIZE, sampler=sampler, num_workers=cfg.LOADER.NUM_WORKS)
+
     result_processor = AvgResultProcessor(ds.domain_id_to_name)
-    
+
     return loader, result_processor

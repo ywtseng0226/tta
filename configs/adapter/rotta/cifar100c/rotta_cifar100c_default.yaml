@@ -23,5 +23,4 @@ ADAPTER:
 
 LOADER:
   SAMPLER:
-    TYPE: "cgs"
-    # TYPE: "class_temporal"
+    TYPE: "class_temporal"
