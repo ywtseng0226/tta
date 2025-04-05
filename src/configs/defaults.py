@@ -21,6 +21,7 @@ _C.CORRUPTION.SEVERITY = [5, 4, 3, 2, 1]
 _C.CORRUPTION.NUM_EX = 10000
 _C.CORRUPTION.NUM_CLASS = -1
 _C.CORRUPTION.RECUR = 10
+_C.CORRUPTION.CGS = False
 _C.CORRUPTION.ORDER_FILE = None
 # ----------------------------- Input options -------------------------- #
 _C.INPUT = CN()
@@ -35,6 +36,7 @@ _C.LOADER.SAMPLER = CN()
 _C.LOADER.SAMPLER.TYPE = "sequence"
 _C.LOADER.SAMPLER.GAMMA = 0.1
 _C.LOADER.SAMPLER.N_EPISODE = 10
+_C.LOADER.SAMPLER.MIX_RATIO = 0.6
 _C.LOADER.NUM_WORKS = 2
 # ------------------------------- Batch norm options ------------------------ #
 _C.BN = CN()

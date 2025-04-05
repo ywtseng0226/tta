@@ -9,4 +9,5 @@ ADAPTER:
   
 LOADER:
   SAMPLER:
-    TYPE: "class_temporal"
+    TYPE: "cgs"
+    # TYPE: "class_temporal"

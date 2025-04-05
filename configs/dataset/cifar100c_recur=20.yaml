@@ -6,7 +6,8 @@ SRC_DATA_DIR: /home/ywt/research/25-TIP-TTA/datasets/CIFAR-100
 
 CORRUPTION:
   DATASET: cifar100c_recur
-  RECUR: 20
+  RECUR: 10
+  CGS: True
   NUM_CLASS: 100
   SEVERITY:
     - 5
