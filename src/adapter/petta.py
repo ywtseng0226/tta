@@ -219,7 +219,10 @@ class PeTTA(BaseAdapter):
                 self.alpha = (1 - divg_scr) * self.cfg.ADAPTER.PETTA.ALPHA_0 
             
         # (Line #15 of Alg. 1) Student model update
-        total_lss = cls_lss + reg_wgt * reg_lss + self.cfg.ADAPTER.PETTA.AL_WGT * anchor_lss
+        ## original
+        # total_lss = cls_lss + reg_wgt * reg_lss + self.cfg.ADAPTER.PETTA.AL_WGT * anchor_lss
+        total_lss = cls_lss + self.cfg.ADAPTER.PETTA.AL_WGT * anchor_lss
+
         optimizer.zero_grad()
         total_lss.backward()
         optimizer.step()

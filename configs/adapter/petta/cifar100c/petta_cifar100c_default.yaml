@@ -22,8 +22,10 @@ ADAPTER:
     ALPHA_0: 0.001
     LAMBDA_0: 10.0
     REGULARIZER: "cosine"
-    ADAPTIVE_LAMBDA: True
-    ADAPTIVE_ALPHA: True
+    ## adaptive learning 
+    ADAPTIVE_LAMBDA: False
+    ADAPTIVE_ALPHA: False
+    
     NORM_LAYER: "rbn"
     
 LOADER:
