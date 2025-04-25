@@ -150,23 +150,7 @@ class MyTTA(BaseAdapter):
     @torch.enable_grad()
     def forward_and_adapt(self, batch_data, model, optimizer, label):
         self.step += 1
-        # 计算当前 batch 的描述符（均值和方差）
-        if isinstance(batch_data, torch.Tensor):
-            data_tensor = batch_data  # (N, C, H, W)
-        else:
-            data_tensor = torch.stack(batch_data)
-        batch_mean = torch.mean(data_tensor, dim=(0, 2, 3))
-        batch_var = torch.var(data_tensor, dim=(0, 2, 3))
-
-        # 根据当前 batch 描述符选择最匹配的 bank，并加载对应模型参数到模型
-        target_bank = self.sample_mem.get_target_bank(batch_mean, batch_var)
-        if target_bank is not None and target_bank["model_state"]:
-            model.load_state_dict(target_bank["model_state"])
-            print("Loaded model parameters from bank.")
-        else:
-            print("No matching model state found in bank.")
-
-        # 生成伪标签（此时模型已加载最匹配 bank 的模型参数）
+        # 使用教师模型生成伪标签（对应论文 Alg.1 的 Line #3）
         with torch.no_grad():
             self.model_ema.eval()
             ema_sup_feat = self.model_ema_feat(batch_data)
@@ -175,17 +159,43 @@ class MyTTA(BaseAdapter):
             pseudo_lbls = torch.argmax(predict, dim=1)
             entropy = torch.sum(-predict * torch.log(predict + 1e-6), dim=1)
 
-        # 提取当前模型的完整参数，用于添加新实例时更新 bank
-        current_model_state = model.state_dict()
+        # print("batch_data type:", type(batch_data))
 
-        # 将当前 batch 的每个实例加入 memory，同时传入当前模型参数
+        # 计算整个 batch 的描述符：均值和方差
+        if isinstance(batch_data, torch.Tensor):
+            data_tensor = batch_data  # 期望形状为 (N, C, H, W)
+        else:
+            data_tensor = torch.stack(batch_data)
+        # 在样本 (N) 以及 H 和 W 维度上计算均值和方差，得到形状 (C,) 的向量
+        batch_mean = torch.mean(data_tensor, dim=(0, 2, 3))
+        batch_var = torch.var(data_tensor, dim=(0, 2, 3))
+
+        # print(batch_mean,batch_var)
+        #petta Adding new samples to sample memory bank (similar to RoTTA)
         for i, data in enumerate(batch_data):
-            self.sample_mem.add_instance((data, pseudo_lbls[i].item(), entropy[i].item(), label[i]),
-                                         model_state=current_model_state)
+            self.sample_mem.add_instance((data,  pseudo_lbls[i].item(),  entropy[i].item(), label[i]))
 
-        # 从 memory 中获取最匹配 bank 的数据及模型参数
-        sup_data, _, _ = self.sample_mem.get_memory(batch_mean, batch_var)
+        # Taking data samples out of memory, for adaptation
+        sup_data, _ = self.sample_mem.get_memory(batch_mean,batch_var)
         sup_data = torch.stack(sup_data)
+
+        # # mytta 构造 batch 内所有 instance（格式：(x, pseudo_label, entropy, label)）
+        # batch_instances = []
+        # for i, data in enumerate(batch_data):
+        #     instance = (data, pseudo_lbls[i].item(), entropy[i].item(), label[i])
+        #     batch_instances.append(instance)
+        # # 调用 add_batch 接口，根据整个 batch 更新 domain memory bank
+        # self.sample_mem.add_batch(batch_instances)
+
+        # # 从 domain memory bank 中提取与当前 batch 描述符最接近的 bank 内的 sample 数据
+        # sup_data_list, _ = self.sample_mem.get_memory(batch_data)
+        # # 注意：sup_data_list 中的每个 data 可能是 tensor（确保都在 CPU 上或相同 device）
+        # if len(sup_data_list) > 0:
+        #     sup_data = torch.stack(sup_data_list)
+        # else:
+        #     # 若未能提取到数据，则使用当前 batch 数据作为后备
+        #     sup_data = batch_data
+
 
         self.model_ema.train()
         ema_feat = self.model_ema_feat(sup_data)
@@ -193,9 +203,6 @@ class MyTTA(BaseAdapter):
         self.model.train()
         self.model_init.train()
         p_ori = self.model(sup_data)
-
-
-
 
         # Computing embedding vectors, and probability vector output for all new samples (using student model)
         init_feat = self.model_init_feat(sup_data) 

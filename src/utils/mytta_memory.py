@@ -3,6 +3,7 @@ import torch.nn.functional as F
 import math
 from copy import deepcopy
 from torch import nn
+import random
 
 def compute_feat_mean(feats, pseudo_lbls):
     lbl_uniq = torch.unique(pseudo_lbls)
@@ -68,29 +69,60 @@ class MemoryItem:
     
 # Adapted from: https://github.com/BIT-DA/RoTTA/blob/main/core/utils/memory.py
 class MyTTAMemory:
-    def __init__(self, capacity, num_class, lambda_t=1.0, lambda_u=1.0, lambda_d=1.0, mem_num=5, eta=0.1, base_threshold=0.5):
-        """
-        :param capacity: 总容量（整个 memory 的最大样本数）
-        :param num_class: 类别数
-        :param lambda_t, lambda_u, lambda_d: age、uncertainty、distance 对启发式分数的权重
-        :param mem_num: 最大 bank 数量（例如 5 个 domain）
-        :param eta: 在线更新 bank 描述符的学习率（EMA 更新）
-        :param base_threshold: 当 bank 内部方差信息不可用时的基础阈值
-        """
+    def __init__(self, capacity, num_class, lambda_t=1.0, lambda_u=1.0, lambda_d=1.0,
+                 mem_num=5, eta=0.1, base_threshold=0.5,
+                 repulse_eta0=0.1):
         self.capacity = capacity
         self.num_class = num_class
-        self.per_class = capacity / num_class  # 每个类别最多存放的样本数
+        self.per_class = capacity / num_class
         self.lambda_t = lambda_t
         self.lambda_u = lambda_u
         self.lambda_d = lambda_d
         self.mem_num = mem_num
         self.eta = eta
         self.base_threshold = base_threshold
+        # repulsion params
+        self.repulse_eta0 = repulse_eta0
 
-        # banks 每个元素为一个字典：
-        # {"items": [[], [], ...]  长度为 num_class，每个元素存储对应类别的 MemoryItem 列表
-        #  "descriptor": (mean, var)} 作为该 bank 的聚类中心描述符
         self.banks = []
+
+    def repulse_banks(self, eps=1e-6):
+        # 少于两个 bank，没得比就跳过
+        if len(self.banks) < 2:
+            return
+
+        # 1) 计算所有两两距离，得 d_min 和 d_avg
+        dists = []
+        for i in range(len(self.banks)):
+            m_i, _ = self.banks[i]["descriptor"]
+            for j in range(i+1, len(self.banks)):
+                m_j, _ = self.banks[j]["descriptor"]
+                d = torch.norm(m_i - m_j).item()
+                dists.append(d)
+        d_min = min(dists)
+        d_avg = sum(dists) / len(dists)
+
+        # 2) 用 d_avg 作为动态目标距离
+        eta = self.repulse_eta0 * (d_avg / (d_min + eps))
+        # 可选：给步长做上下界
+        eta = max(min(eta, self.repulse_eta0 * 10), self.repulse_eta0 * 0.1)
+
+        # 3) 打印调试信息，观察收敛情况
+        # print(f"[Repulse] banks={len(self.banks)}  d_min={d_min:.4f}  d_avg={d_avg:.4f}  eta={eta:.6f}")
+
+        # 4) 真正做排斥更新
+        for i, bi in enumerate(self.banks):
+            mean_i, var_i = bi["descriptor"]
+            delta = torch.zeros_like(mean_i)
+            for j, bj in enumerate(self.banks):
+                if i == j:
+                    continue
+                mean_j, _ = bj["descriptor"]
+                diff = mean_i - mean_j
+                delta += eta * diff / (diff.norm()**2 + eps)
+            bi["descriptor"] = (mean_i + delta, var_i)
+
+
 
     def compute_instance_descriptor(self, data):
         """
@@ -131,10 +163,10 @@ class MyTTAMemory:
         return torch.norm(inst_concat - bank_concat, p=2)
 
     def update_bank_descriptor(self, bank):
-        """
-        使用 bank["items"] 重新计算 bank 的描述符（聚类中心）。
-        """
         bank["descriptor"] = self.compute_bank_descriptor(bank["items"])
+        # 全局排斥一下
+        # self.repulse_banks()
+
 
     def get_dynamic_threshold(self, bank):
         """
@@ -156,11 +188,10 @@ class MyTTAMemory:
         """
         x, prediction, uncertainty, true_label = instance
         new_item = MemoryItem(data=x, uncertainty=uncertainty, age=0, true_label=true_label)
-        # 计算新实例描述符
+        # 计算新实例的描述符
         instance_descriptor = self.compute_instance_descriptor(x)
         # 遍历已有 banks，找出距离最近的 bank
         best_bank = None
-
         best_distance = float('inf')
         for bank in self.banks:
             bank_descriptor = bank["descriptor"]
@@ -173,58 +204,85 @@ class MyTTAMemory:
 
         # 如果没有 bank 或者（距离超过动态阈值且 bank 数量未满）则新建 bank
         if best_bank is None or (best_distance > self.get_dynamic_threshold(best_bank) and len(self.banks) < self.mem_num):
-            # 新 bank 的描述符直接初始化为该实例的描述符
             new_bank = {
                 "items": [[] for _ in range(self.num_class)],
                 "descriptor": instance_descriptor
             }
             self.banks.append(new_bank)
             target_bank = new_bank
-            # print("add")
         else:
             target_bank = best_bank
-            # 在线更新 bank 描述符（EMA 更新）
-            old_mean, old_var = target_bank["descriptor"]
-            new_mean = (1 - self.eta) * old_mean + self.eta * instance_descriptor[0]
-            new_var = (1 - self.eta) * old_var + self.eta * instance_descriptor[1]
-            target_bank["descriptor"] = (new_mean, new_var)
+
+        bank_idx = self.banks.index(target_bank)
+        # print(f"[MyTTAMemory] adding to bank #{bank_idx}")
 
         # 将新实例加入 target_bank 对应类别
         class_idx = true_label  # 假设 true_label 为类别索引整数
         new_score = self.heuristic_score(age=0, uncertainty=uncertainty, data=x, bank=target_bank)
-        if len(target_bank["items"][class_idx]) < self.per_class:
+
+        if self.remove_instance(target_bank, class_idx, new_score):
             target_bank["items"][class_idx].append(new_item)
+            self.update_bank_descriptor(target_bank)
         else:
-            # 如果该类别已满，则尝试替换启发式分数较高的样本
-            if self.remove_from_bank_for_class(target_bank, class_idx, new_score):
-                target_bank["items"][class_idx].append(new_item)
-                self.update_bank_descriptor(target_bank)
-            else:
-                # 否则丢弃该样本，或可调整策略
-                pass
+            # 否则丢弃该样本，或可根据需求调整策略
+            pass
 
         self.add_age(target_bank)
 
-    def remove_from_bank_for_class(self, bank, cls, new_score):
-        """
-        在 bank 指定类别列表中，找到启发式分数最高的样本，
-        若其分数大于 new_score，则将其移除，返回 True；否则返回 False。
-        """
+
+    def remove_instance(self, bank, cls, new_score):
+
         items = bank["items"][cls]
-        if len(items) < self.per_class:
-            return True
+        class_occupied = len(items)
+        all_occupancy = sum(len(lst) for lst in bank["items"])
+        # print("all_occupancy:",all_occupancy)
+        # 如果目标类别未满且整体容量未达到上限，直接允许添加
+        if class_occupied < self.per_class:
+            if all_occupancy < self.capacity:
+                return True
+            else:
+                max_count = max(len(lst) for lst in bank["items"])
+                majority_classes = [i for i, lst in enumerate(bank["items"]) if len(lst) == max_count]
+                return self.remove_from_classes(bank,majority_classes,new_score,)
+        else:
+            # print("remove")
+            return self.remove_from_classes(bank,[cls],new_score)
+        
+    def remove_from_classes(self, bank, classes, score_base):
+        """
+        在 bank 指定的多个类别中，尝试删除启发式分数最高且大于 score_base 的样本。
+        
+        参数：
+        bank：包含内存样本的 bank 字典，其结构为 {"items": [[], [], ...], "descriptor": ...}
+        classes：待检查的类别列表（例如 [cls] 或 majority_classes）
+        score_base：新样本的启发式分数，只有删除的样本分数大于此值时才执行删除
+        
+        返回：
+        如果成功删除一个样本则返回 True，否则返回 False。
+        """
         max_score = None
+        max_class = None
         max_index = None
-        for idx, item in enumerate(items):
-            s = self.heuristic_score(item.age, item.uncertainty, item.data, bank)
-            if max_score is None or s > max_score:
-                max_score = s
-                max_index = idx
-        if max_score is not None and max_score > new_score:
-            items.pop(max_index)
+        
+        # 遍历待检查的类别
+        for c in classes:
+            items = bank["items"][c]
+            for idx, item in enumerate(items):
+                # 计算每个样本的启发式分数（age, uncertainty, data，bank 信息会影响评分）
+                s = self.heuristic_score(item.age, item.uncertainty, item.data, bank)
+                if max_score is None or s > max_score:
+                    max_score = s
+                    max_class = c
+                    max_index = idx
+
+        # 如果找到的最大分数大于 score_base，则删除该样本并返回 True
+        if max_class is not None and max_score > score_base:
+            d = bank["items"][max_class].pop(max_index)
+            del d
             return True
         else:
             return False
+
 
     def add_age(self, bank):
         """
@@ -251,31 +309,65 @@ class MyTTAMemory:
 
     def get_memory(self, batch_mean, batch_var):
         """
-        根据传入的 (batch_mean, batch_var) 描述符返回一个 bank 内的数据。
-        这里可采用简单的策略：返回第一个 bank的数据（或进一步选择最匹配的 bank）。
-        返回格式：sup_data, sup_age
+        建立一个“重放”bank：95%来自最匹配的bank，5%随机抽自其他banks，
+        总样本数与匹配bank一致，并返回 data 和 age 列表。
         """
         if not self.banks:
             return [], []
-        # 例如：选择 descriptor 与 (batch_mean, batch_var) 距离最小的 bank
-        target_bank = None
+
+        # 找到最匹配的 bank
         best_distance = float('inf')
+        target_bank = None
         target_descriptor = (batch_mean, batch_var)
         for bank in self.banks:
-            if bank["descriptor"][0] is None:
+            desc = bank["descriptor"]
+            if desc[0] is None: 
                 continue
-            d = self.descriptor_distance(target_descriptor, bank["descriptor"])
+            d = self.descriptor_distance(target_descriptor, desc)
             if d < best_distance:
-                best_distance = d
-                target_bank = bank
-        # print("target_bank",target_bank)
+                best_distance, target_bank = d, bank
 
         if target_bank is None:
             return [], []
-        sup_data = []
-        sup_age = []
-        for class_items in target_bank["items"]:
-            sup_data.extend([item.data for item in class_items])
-            sup_age.extend([item.age for item in class_items])
-        return sup_data, sup_age
 
+        # 把匹配bank里所有item平铺
+        primary_items = [item
+                         for cls_items in target_bank["items"]
+                         for item in cls_items]
+        total = len(primary_items)
+        if total == 0:
+            return [], []
+
+        # 95% 主样本，5% 次样本
+        secondary_count = max(1, int(total * 0.5))
+        primary_count   = total - secondary_count
+
+  
+
+        # 随机选主样本
+        if primary_count >= total:
+            selected_primary = primary_items.copy()
+        else:
+            selected_primary = random.sample(primary_items, primary_count)
+
+        # 收集其他banks所有item，再随机抽次样本
+        other_items = [item
+                       for bank in self.banks if bank is not target_bank
+                       for cls_items in bank["items"]
+                       for item in cls_items]
+        if other_items:
+            if len(other_items) >= secondary_count:
+                selected_secondary = random.sample(other_items, secondary_count)
+            else:
+                selected_secondary = random.choices(other_items, k=secondary_count)
+        else:
+            selected_secondary = []
+
+        # 合并、打乱顺序
+        replay_items = selected_primary + selected_secondary
+        random.shuffle(replay_items)
+
+        # 拆出 data 和 age
+        sup_data = [item.data for item in replay_items]
+        sup_age  = [item.age  for item in replay_items]
+        return sup_data, sup_age
