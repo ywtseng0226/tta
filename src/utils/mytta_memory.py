@@ -291,60 +291,63 @@ class MyTTAMemory:
         sup_age = [item.age for item in replay_items]
         return sup_data, sup_age
 
-    def get_sup_data(self, batch_samples, topk=3):
+    def get_sup_data(self, batch_samples, topk=3, max_samples=64):
         """
-        Select top-K banks by sample-wise nearest-bank voting.
-        
-        Steps:
-        1. For each sample, find its closest bank.
-        2. Count votes for each bank.
-        3. Select top-K most voted banks.
-        4. Collect all items from these top-K banks as sup_data.
-        
+        Select top-K banks based on total distance to all samples in the batch,
+        then sample up to `max_samples` for learning.
+
+        Args:
+            batch_samples: Tensor of shape (N, C, H, W)
+            topk: number of closest banks to use
+            max_samples: upper limit of replay samples (default = 64)
+
         Returns:
             sup_data: list of tensors
-            sup_age:  list of corresponding ages
+            sup_age: list of corresponding ages
         """
         if not self.banks:
             return [], []
 
-        closest_bank_ids = []
+        # Step 1: Compute descriptor (mean, var) for each sample
+        sample_descriptors = []
+        for i in range(batch_samples.shape[0]):
+            mean = torch.mean(batch_samples[i], dim=(1, 2))  # (C,)
+            var = torch.var(batch_samples[i], dim=(1, 2))    # (C,)
+            sample_descriptors.append((mean, var))
 
-        # Step 1: For each sample, find its closest bank
-        for sample in batch_samples:
-            mean = torch.mean(sample, dim=(1, 2))
-            var = torch.var(sample, dim=(1, 2))
-            descriptor = (mean, var)
+        # Step 2: Compute total distance to each bank
+        total_dists = []
+        valid_bank_ids = []
 
-            best_dist = float("inf")
-            best_bank_idx = -1
+        for bank_id, bank in enumerate(self.banks):
+            bank_desc = bank["descriptor"]
+            if bank_desc[0] is None:
+                continue
 
-            for i, bank in enumerate(self.banks):
-                desc = bank["descriptor"]
-                if desc[0] is None:
-                    continue
-                dist = self.descriptor_distance(descriptor, desc)
-                if dist < best_dist:
-                    best_dist = dist
-                    best_bank_idx = i
+            dist_sum = sum(self.descriptor_distance(sample_desc, bank_desc) for sample_desc in sample_descriptors)
+            total_dists.append(dist_sum)
+            valid_bank_ids.append(bank_id)
 
-            if best_bank_idx >= 0:
-                closest_bank_ids.append(best_bank_idx)
+        if not total_dists:
+            return [], []
 
-        # Step 2: Count votes
-        bank_vote_counts = Counter(closest_bank_ids)
+        # Step 3: Get top-K banks by lowest total distance
+        sorted_ids = sorted(zip(valid_bank_ids, total_dists), key=lambda x: x[1])
+        topk_bank_ids = [bank_id for bank_id, _ in sorted_ids[:topk]]
 
-        # Step 3: Select top-K voted banks
-        topk_bank_ids = [bank_id for bank_id, _ in bank_vote_counts.most_common(topk)]
-
-        # Step 4: Collect all samples from those top-K banks
+        # Step 4: Collect memory items from selected banks
         selected_items = []
         for bank_id in topk_bank_ids:
             for cls_items in self.banks[bank_id]["items"]:
                 selected_items.extend(cls_items)
 
+        # Step 5: Limit to max_samples with random shuffle
         random.shuffle(selected_items)
+        selected_items = selected_items[:max_samples]
+
+        # Step 6: Build outputs
         sup_data = [item.data for item in selected_items]
         sup_age = [item.age for item in selected_items]
+
         return sup_data, sup_age
 
