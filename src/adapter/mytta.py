@@ -165,7 +165,7 @@ class MyTTA(BaseAdapter):
         # Retrieve relevant samples from memory
         sup_data, _ = self.sample_mem.get_memory(batch_mean, batch_var)
         sup_data = torch.stack(sup_data)
-
+        
         # Get predictions from student and teacher models
         self.model_ema.train()
         ema_feat = self.model_ema_feat(sup_data)

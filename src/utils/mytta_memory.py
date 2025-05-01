@@ -90,37 +90,6 @@ class MyTTAMemory:
         self.repulse_eta0 = repulse_eta0
         self.banks = []
 
-    def repulse_banks(self, eps=1e-6):
-        """
-        Apply repulsion among banks to maintain diversity of stored prototypes.
-        """
-        if len(self.banks) < 2:
-            return
-
-        dists = []
-        for i in range(len(self.banks)):
-            m_i, _ = self.banks[i]["descriptor"]
-            for j in range(i+1, len(self.banks)):
-                m_j, _ = self.banks[j]["descriptor"]
-                d = torch.norm(m_i - m_j).item()
-                dists.append(d)
-
-        d_min = min(dists)
-        d_avg = sum(dists) / len(dists)
-        eta = self.repulse_eta0 * (d_avg / (d_min + eps))
-        eta = max(min(eta, self.repulse_eta0 * 10), self.repulse_eta0 * 0.1)
-
-        for i, bi in enumerate(self.banks):
-            mean_i, var_i = bi["descriptor"]
-            delta = torch.zeros_like(mean_i)
-            for j, bj in enumerate(self.banks):
-                if i == j:
-                    continue
-                mean_j, _ = bj["descriptor"]
-                diff = mean_i - mean_j
-                delta += eta * diff / (diff.norm()**2 + eps)
-            bi["descriptor"] = (mean_i + delta, var_i)
-
     def compute_instance_descriptor(self, data):
         """
         Compute descriptor (mean, var) of a single image tensor with shape (C, H, W).

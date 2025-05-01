@@ -51,7 +51,7 @@ class PeTTA(BaseAdapter):
 
         self.step = 0
 
-    def compute_source_features(self, recompute=False):
+    def compute_source_features(self, recompute=False): 
         proto_dir = os.path.join(self.cfg.CKPT_DIR, "prototypes")
         os.makedirs(proto_dir, exist_ok=True)
 
