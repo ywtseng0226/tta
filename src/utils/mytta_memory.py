@@ -133,13 +133,60 @@ class MyTTAMemory:
         avg_std = torch.mean(std).item()
         return self.base_threshold * (1 + avg_std)
 
-    # Main entry: add a new sample to the memory bank
+    def merge_two_closest_banks(self):
+        min_dist = float("inf")
+        pair_to_merge = None
+
+        for i in range(len(self.banks)):
+            for j in range(i + 1, len(self.banks)):
+                desc_i = self.banks[i]["descriptor"]
+                desc_j = self.banks[j]["descriptor"]
+                if desc_i[0] is None or desc_j[0] is None:
+                    continue
+                dist = self.descriptor_distance(desc_i, desc_j)
+                if dist < min_dist:
+                    min_dist = dist
+                    pair_to_merge = (i, j)
+
+        if pair_to_merge is None:
+            return
+
+        i, j = pair_to_merge
+        bank_i = self.banks[i]
+        bank_j = self.banks[j]
+
+        for cls in range(self.num_class):
+            bank_i["items"][cls].extend(bank_j["items"][cls])
+
+        del self.banks[j]
+
+        all_items = []
+        for cls_items in bank_i["items"]:
+            all_items.extend(cls_items)
+
+        if len(all_items) > self.capacity:
+            all_items.sort(key=lambda item: item.uncertainty)
+            all_items = all_items[:self.capacity]
+
+        new_class_items = [[] for _ in range(self.num_class)]
+        for item in all_items:
+            label = item.true_label
+            if len(new_class_items[label]) < self.per_class:
+                new_class_items[label].append(item)
+
+        bank_i["items"] = new_class_items
+        self.update_bank_descriptor(bank_i)
+
     def add_instance(self, instance):
+        """
+        Add a new sample to the memory bank system. Handles matching, insertion,
+        replacement, and dynamic bank creation or merging if needed.
+        """
         x, prediction, uncertainty, true_label = instance
         new_item = MemoryItem(data=x, uncertainty=uncertainty, age=0, true_label=true_label)
         instance_descriptor = self.compute_instance_descriptor(x)
 
-        # Match this sample to an existing bank (if close enough)
+        # Step 1: Find the closest matching bank
         best_bank = None
         best_distance = float('inf')
         for bank in self.banks:
@@ -151,17 +198,29 @@ class MyTTAMemory:
                 best_distance = d
                 best_bank = bank
 
-        # If unmatched and space available → create new bank
-        if best_bank is None or (best_distance > self.get_dynamic_threshold(best_bank) and len(self.banks) < self.mem_num):
-            new_bank = {
-                "items": [[] for _ in range(self.num_class)],
-                "descriptor": instance_descriptor
-            }
-            self.banks.append(new_bank)
-            target_bank = new_bank
+        # Step 2: Create new bank or use best matching one
+        if best_bank is None or (best_distance > self.get_dynamic_threshold(best_bank)):
+            if len(self.banks) < self.mem_num:
+                # Create a new bank directly
+                new_bank = {
+                    "items": [[] for _ in range(self.num_class)],
+                    "descriptor": instance_descriptor
+                }
+                self.banks.append(new_bank)
+                target_bank = new_bank
+            else:
+                # Memory full, consolidate before adding
+                self.merge_two_closest_banks()
+                new_bank = {
+                    "items": [[] for _ in range(self.num_class)],
+                    "descriptor": instance_descriptor
+                }
+                self.banks.append(new_bank)
+                target_bank = new_bank
         else:
             target_bank = best_bank
 
+        # Step 3: Score the item and attempt to insert
         class_idx = true_label
         new_score = self.heuristic_score(age=0, uncertainty=uncertainty, data=x, bank=target_bank)
 
@@ -169,10 +228,15 @@ class MyTTAMemory:
             target_bank["items"][class_idx].append(new_item)
             self.update_bank_descriptor(target_bank)
 
+        # Step 4: Increment age of all samples in the target bank
         self.add_age(target_bank)
 
-    # Logic to decide when to remove existing sample
+
     def remove_instance(self, bank, cls, new_score):
+        """
+        Decide whether there's space to insert a new item in a class.
+        If not, determine whether to replace an existing item.
+        """
         items = bank["items"][cls]
         class_occupied = len(items)
         all_occupancy = sum(len(lst) for lst in bank["items"])
@@ -181,11 +245,14 @@ class MyTTAMemory:
             if all_occupancy < self.capacity:
                 return True
             else:
+                # Too full, consider replacing from majority classes
                 max_count = max(len(lst) for lst in bank["items"])
                 majority_classes = [i for i, lst in enumerate(bank["items"]) if len(lst) == max_count]
                 return self.remove_from_classes(bank, majority_classes, new_score)
         else:
+            # Class full, try to replace within the same class
             return self.remove_from_classes(bank, [cls], new_score)
+
 
     def remove_from_classes(self, bank, classes, score_base):
         max_score = None
