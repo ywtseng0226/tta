@@ -6,7 +6,7 @@ import tqdm
 
 from src.adapter.base_adapter import BaseAdapter
 from src.utils.loss_func import self_training, softmax_entropy
-from src.utils import set_named_submodule, get_named_submodule, petta_memory
+from src.utils import set_named_submodule, get_named_submodule, PeTTAMemory
 from src.utils.custom_transforms import get_tta_transforms
 from src.utils.bn_layers import RobustBN1d, RobustBN2d
 from src.utils.petta_utils import split_up_model, get_source_loader
@@ -40,14 +40,14 @@ class PeTTA(BaseAdapter):
         src_feat_mean, src_feat_cov = self.compute_source_features()
 
         # Memory modules
-        self.sample_mem = petta_memory.PeTTAMemory(
+        self.sample_mem = PeTTAMemory.PeTTAMemory(
             capacity=cfg.ADAPTER.RoTTA.MEMORY_SIZE,
             num_class=cfg.CORRUPTION.NUM_CLASS,
             lambda_t=cfg.ADAPTER.RoTTA.LAMBDA_T,
             lambda_u=cfg.ADAPTER.RoTTA.LAMBDA_U
         )
-        self.proto_mem = petta_memory.PrototypeMemory(src_feat_mean, self.num_classes)
-        self.divg_score = petta_memory.DivergenceScore(src_feat_mean, src_feat_cov)
+        self.proto_mem = PeTTAMemory.PrototypeMemory(src_feat_mean, self.num_classes)
+        self.divg_score = PeTTAMemory.DivergenceScore(src_feat_mean, src_feat_cov)
 
         self.step = 0
 

@@ -26,9 +26,9 @@ class MemoryItem:
         return self.data == "empty"
 
 # MyTTAMemory: memory bank for adaptive sample selection at test time
-class MyTTAMemory:
+class ShortTermMemory:
     def __init__(self, capacity, num_class, lambda_t=1.0, lambda_u=1.0, lambda_d=1.0,
-                 mem_num=5, eta=0.1, base_threshold=0.5, ):
+                 mem_num=1, eta=0.1, base_threshold=0.5, ):
         self.capacity = capacity  # total memory capacity
         self.num_class = num_class
         self.per_class = capacity / num_class  # class-wise quota
@@ -46,18 +46,18 @@ class MyTTAMemory:
         data_var = torch.var(data, dim=(1, 2))
         return data_mean, data_var
 
-    # Compute bank-wide descriptor by aggregating all items
-    def compute_bank_descriptor(self, bank_items):
+    def update_bank_descriptor(self, bank):
         all_items = []
-        for class_items in bank_items:
+        for class_items in bank["items"]:
             all_items.extend(class_items)
         if len(all_items) == 0:
-            return None, None
+            bank["descriptor"] = (None, None)
+            return
         data_tensor = torch.stack([item.data for item in all_items])
         bank_mean = torch.mean(data_tensor, dim=(0, 2, 3))
         bank_var = torch.var(data_tensor, dim=(0, 2, 3))
-        return bank_mean, bank_var
-
+        bank["descriptor"] = (bank_mean, bank_var)
+    
     # Euclidean distance between two (mean, var) descriptors
     def descriptor_distance(self, instance_descriptor, bank_descriptor):
         inst_mean, inst_var = instance_descriptor
@@ -66,8 +66,6 @@ class MyTTAMemory:
         bank_concat = torch.cat([bank_mean, bank_var])
         return torch.norm(inst_concat - bank_concat, p=2)
 
-    def update_bank_descriptor(self, bank):
-        bank["descriptor"] = self.compute_bank_descriptor(bank["items"])
 
     # Get adaptive threshold for deciding if a sample fits into a bank
     def get_dynamic_threshold(self, bank):

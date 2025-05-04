@@ -6,7 +6,8 @@ import torch.nn.functional as F
 from src.adapter.base_adapter import BaseAdapter
 
 from src.utils.loss_func import self_training, softmax_entropy
-from src.utils import set_named_submodule, get_named_submodule, mytta_memory
+from src.utils import set_named_submodule, get_named_submodule
+from src.utils import PeTTAMemory, ShortTermMemory, mytta_memory
 from src.utils.custom_transforms import get_tta_transforms
 from src.utils.bn_layers import RobustBN1d, RobustBN2d
 from src.utils.petta_utils import split_up_model, get_source_loader
@@ -44,15 +45,16 @@ class MyTTA(BaseAdapter):
         src_feat_mean, src_feat_cov = self.compute_source_features()
 
         # Initialize memory modules
-        self.sample_mem = mytta_memory.MyTTAMemory(
+        self.sample_mem = ShortTermMemory.ShortTermMemory(
             capacity=self.cfg.ADAPTER.RoTTA.MEMORY_SIZE,
             num_class=cfg.CORRUPTION.NUM_CLASS,
             lambda_t=cfg.ADAPTER.RoTTA.LAMBDA_T,
             lambda_u=cfg.ADAPTER.RoTTA.LAMBDA_U,
         )
-        self.proto_mem = mytta_memory.PrototypeMemory(src_feat_mean, self.num_classes)
-        self.divg_score = mytta_memory.DivergenceScore(src_feat_mean, src_feat_cov)
+        self.proto_mem = PeTTAMemory.PrototypeMemory(src_feat_mean, self.num_classes)
+        self.divg_score = PeTTAMemory.DivergenceScore(src_feat_mean, src_feat_cov)
 
+        # Initialize step counter
         self.step = 0
 
     def compute_source_features(self, recompute=False):
@@ -165,7 +167,6 @@ class MyTTA(BaseAdapter):
         # Stack the retrieved samples into a tensor batch
         sup_data = torch.stack(sup_data)
 
-        
         # Get predictions from student and teacher models
         self.model_ema.train()
         ema_feat = self.model_ema_feat(sup_data)
