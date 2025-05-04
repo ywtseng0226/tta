@@ -81,8 +81,7 @@ class MemoryItem:
 # MyTTAMemory: memory bank for adaptive sample selection at test time
 class MyTTAMemory:
     def __init__(self, capacity, num_class, lambda_t=1.0, lambda_u=1.0, lambda_d=1.0,
-                 mem_num=5, eta=0.1, base_threshold=0.5,
-                 repulse_eta0=0.1):
+                 mem_num=5, eta=0.1, base_threshold=0.5, ):
         self.capacity = capacity  # total memory capacity
         self.num_class = num_class
         self.per_class = capacity / num_class  # class-wise quota
@@ -92,7 +91,6 @@ class MyTTAMemory:
         self.mem_num = mem_num  # max number of banks
         self.eta = eta
         self.base_threshold = base_threshold
-        self.repulse_eta0 = repulse_eta0
         self.banks = []  # memory banks (clusters)
 
     # Compute feature descriptor for a single image: (mean, var) over channels

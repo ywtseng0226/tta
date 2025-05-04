@@ -159,18 +159,10 @@ class MyTTA(BaseAdapter):
         for i, data in enumerate(batch_data):
             self.sample_mem.add_instance((data, pseudo_lbls[i].item(), entropy[i].item(), label[i]))
 
-
-        # Compute descriptor (mean and var) across the whole batch
-        batch_mean = torch.mean(data_tensor, dim=(0, 2, 3))
-        batch_var = torch.var(data_tensor, dim=(0, 2, 3))
-
-        # Use original get_memory interface (based on batch descriptor)
-        # sup_data, _ = self.sample_mem.get_memory(batch_mean, batch_var)
-
-        # # 🔁 New: Pass the whole batch tensor into get_memory
+        # 🔁 New: Pass the whole batch tensor into get_memory
         sup_data, _ = self.sample_mem.get_sup_data(data_tensor) 
 
-        # # Stack the retrieved samples into a tensor batch
+        # Stack the retrieved samples into a tensor batch
         sup_data = torch.stack(sup_data)
 
         
