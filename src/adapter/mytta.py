@@ -45,14 +45,14 @@ class MyTTA(BaseAdapter):
         src_feat_mean, src_feat_cov = self.compute_source_features()
 
         # Initialize memory modules
-        self.sample_mem = ShortTermMemory.ShortTermMemory(
+        self.proto_mem = PeTTAMemory.PrototypeMemory(src_feat_mean, self.num_classes)
+        self.divg_score = PeTTAMemory.DivergenceScore(src_feat_mean, src_feat_cov)
+        self.short_term_memory = ShortTermMemory.ShortTermMemory(
             capacity=self.cfg.ADAPTER.RoTTA.MEMORY_SIZE,
             num_class=cfg.CORRUPTION.NUM_CLASS,
             lambda_t=cfg.ADAPTER.RoTTA.LAMBDA_T,
             lambda_u=cfg.ADAPTER.RoTTA.LAMBDA_U,
         )
-        self.proto_mem = PeTTAMemory.PrototypeMemory(src_feat_mean, self.num_classes)
-        self.divg_score = PeTTAMemory.DivergenceScore(src_feat_mean, src_feat_cov)
 
         # Initialize step counter
         self.step = 0
@@ -141,6 +141,30 @@ class MyTTA(BaseAdapter):
         for ema_param, param in zip(ema_model.parameters(), model.parameters()):
             ema_param.data[:] = (1 - alpha) * ema_param.data[:] + alpha * param.data[:]
         return ema_model
+    
+    def show_mem_info(self):
+        # ✅ Check short-term memory status
+        print(f"[ShortTermMemory] Total Banks: {len(self.short_term_memory.banks)}")
+        for i, bank in enumerate(self.short_term_memory.banks):
+            total = 0
+            age_list = []
+            class_counts = []
+            for cls_items in bank["items"]:
+                class_counts.append(len(cls_items))
+                total += len(cls_items)
+                age_list.extend([item.age for item in cls_items])
+
+            if age_list:
+                min_age = min(age_list)
+                max_age = max(age_list)
+                avg_age = sum(age_list) / len(age_list)
+            else:
+                min_age = max_age = avg_age = 0
+
+            print(f"  Bank {i}:")
+            print(f"    Total samples: {total}")
+            print(f"    Class-wise counts: {class_counts}")
+            print(f"    Age -> min: {min_age}, max: {max_age}, avg: {avg_age:.2f}")
 
     @torch.enable_grad()
     def forward_and_adapt(self, batch_data, model, optimizer, label):
@@ -159,12 +183,11 @@ class MyTTA(BaseAdapter):
 
         # Add each sample to memory as before
         for i, data in enumerate(batch_data):
-            self.sample_mem.add_instance((data, pseudo_lbls[i].item(), entropy[i].item(), label[i]))
+            self.short_term_memory.add_instance((data, pseudo_lbls[i].item(), entropy[i].item(), label[i]))
+        self.show_mem_info()
 
-        # 🔁 New: Pass the whole batch tensor into get_memory
-        sup_data, _ = self.sample_mem.get_sup_data(data_tensor) 
-
-        # Stack the retrieved samples into a tensor batch
+        # Get the support data from shor-term memory
+        sup_data, _ = self.short_term_memory.get_sup_data(data_tensor) 
         sup_data = torch.stack(sup_data)
 
         # Get predictions from student and teacher models
