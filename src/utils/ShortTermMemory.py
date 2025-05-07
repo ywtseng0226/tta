@@ -9,18 +9,18 @@ from collections import Counter
 
 # MemoryItem: stores one sample and its meta info in memory bank
 class MemoryItem:
-    def __init__(self, data=None, uncertainty=0, age=0, true_label=None):
+    def __init__(self, data=None, uncert=0, age=0, label=None):
         self.data = data
-        self.uncertainty = uncertainty
+        self.uncert = uncert
         self.age = age
-        self.true_label = true_label
+        self.label = label
 
     def increase_age(self):
         if not self.empty():
             self.age += 1
 
     def get_data(self):
-        return self.data, self.uncertainty, self.age
+        return self.data, self.uncert, self.age
 
     def empty(self):
         return self.data == "empty"
@@ -28,14 +28,14 @@ class MemoryItem:
 # MyTTAMemory: memory bank for adaptive sample selection at test time
 class ShortTermMemory:
     def __init__(self, capacity, num_class, lambda_t=1.0, lambda_u=1.0, lambda_d=1.0,
-                 mem_num=1, eta=0.1, base_threshold=0.5, ):
+                 max_bank_num=1, eta=0.1, base_threshold=0.5, ):
         self.capacity = capacity  # total memory capacity
         self.num_class = num_class
         self.per_class = capacity / num_class  # class-wise quota
         self.lambda_t = lambda_t  # age factor
         self.lambda_u = lambda_u  # uncertainty factor
         self.lambda_d = lambda_d  # distance factor
-        self.mem_num = mem_num  # max number of banks
+        self.max_bank_num = max_bank_num  # max number of banks
         self.eta = eta
         self.base_threshold = base_threshold
         self.banks = []  # memory banks (clusters)
@@ -76,7 +76,7 @@ class ShortTermMemory:
         avg_std = torch.mean(std).item()
         return self.base_threshold * (1 + avg_std)
 
-    def merge_two_closest_banks(self):
+    def consolidation(self):
         min_dist = float("inf")
         pair_to_merge = None
 
@@ -108,12 +108,12 @@ class ShortTermMemory:
             all_items.extend(cls_items)
 
         if len(all_items) > self.capacity:
-            all_items.sort(key=lambda item: item.uncertainty)
+            all_items.sort(key=lambda item: item.uncert)
             all_items = all_items[:self.capacity]
 
         new_class_items = [[] for _ in range(self.num_class)]
         for item in all_items:
-            label = item.true_label
+            label = item.label
             if len(new_class_items[label]) < self.per_class:
                 new_class_items[label].append(item)
 
@@ -121,51 +121,33 @@ class ShortTermMemory:
         self.update_bank_descriptor(bank_i)
 
     def add_instance(self, instance):
-        """
-        Add a new sample to the memory bank system. Handles matching, insertion,
-        replacement, and dynamic bank creation or merging if needed.
-        """
-        x, prediction, uncertainty, true_label = instance
-        new_item = MemoryItem(data=x, uncertainty=uncertainty, age=0, true_label=true_label)
+        x, pred, uncert, label = instance
+        new_item = MemoryItem(data=x, uncert=uncert, age=0, label=label)
         instance_descriptor = self.compute_instance_descriptor(x)
 
-        # Step 1: Find the closest matching bank
-        best_bank = None
-        best_distance = float('inf')
+        # Find the closest matching bank
+        target_bank, target_distance = None, float('inf')
         for bank in self.banks:
             bank_descriptor = bank["descriptor"]
-            if bank_descriptor[0] is None:
-                continue
-            d = self.descriptor_distance(instance_descriptor, bank_descriptor)
-            if d < best_distance:
-                best_distance = d
-                best_bank = bank
-
-        # Step 2: Create new bank or use best matching one
-        if best_bank is None or (best_distance > self.get_dynamic_threshold(best_bank)):
-            if len(self.banks) < self.mem_num:
-                # Create a new bank directly
-                new_bank = {
+            dist = self.descriptor_distance(instance_descriptor, bank_descriptor)
+            if dist < target_distance:
+                target_distance = dist
+                target_bank = bank
+        
+        # Do we need to add a new bank?
+        if target_bank is None or (target_distance > self.get_dynamic_threshold(target_bank)):
+            new_bank = {
                     "items": [[] for _ in range(self.num_class)],
                     "descriptor": instance_descriptor
                 }
-                self.banks.append(new_bank)
-                target_bank = new_bank
-            else:
-                # Memory full, consolidate before adding
-                self.merge_two_closest_banks()
-                new_bank = {
-                    "items": [[] for _ in range(self.num_class)],
-                    "descriptor": instance_descriptor
-                }
-                self.banks.append(new_bank)
-                target_bank = new_bank
-        else:
-            target_bank = best_bank
-
-        # Step 3: Score the item and attempt to insert
-        class_idx = prediction
-        new_score = self.heuristic_score(age=0, uncertainty=uncertainty, data=x, bank=target_bank)
+            self.banks.append(new_bank)
+            target_bank = new_bank
+            if len(self.banks) > self.max_bank_num: 
+                self.consolidation()
+        
+        # Score the item and attempt to insert
+        class_idx = pred
+        new_score = self.heuristic_score(age=0, uncert=uncert, data=x, bank=target_bank)
 
         if self.remove_instance(target_bank, class_idx, new_score):
             target_bank["items"][class_idx].append(new_item)
@@ -173,7 +155,6 @@ class ShortTermMemory:
 
         # Step 4: Increment age of all samples in the target bank
         self.add_age(target_bank)
-
 
     def remove_instance(self, bank, cls, new_score):
         """
@@ -196,7 +177,6 @@ class ShortTermMemory:
             # Class full, try to replace within the same class
             return self.remove_from_classes(bank, [cls], new_score)
 
-
     def remove_from_classes(self, bank, classes, score_base):
         max_score = None
         max_class = None
@@ -205,7 +185,7 @@ class ShortTermMemory:
         for c in classes:
             items = bank["items"][c]
             for idx, item in enumerate(items):
-                s = self.heuristic_score(item.age, item.uncertainty, item.data, bank)
+                s = self.heuristic_score(item.age, item.uncert, item.data, bank)
                 if max_score is None or s > max_score:
                     max_score = s
                     max_class = c
@@ -222,13 +202,13 @@ class ShortTermMemory:
             for item in class_items:
                 item.increase_age()
 
-    def heuristic_score(self, age, uncertainty, data, bank):
+    def heuristic_score(self, age, uncert, data, bank):
         # Lower score means higher priority to be kept
         instance_descriptor = self.compute_instance_descriptor(data)
         bank_descriptor = bank["descriptor"]
         distance = self.descriptor_distance(instance_descriptor, bank_descriptor)
         score = self.lambda_t * (1 / (1 + math.exp(-age / self.capacity))) + \
-                self.lambda_u * (uncertainty / math.log(self.num_class)) + \
+                self.lambda_u * (uncert / math.log(self.num_class)) + \
                 self.lambda_d * distance
         return score
 

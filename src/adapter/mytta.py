@@ -52,8 +52,8 @@ class MyTTA(BaseAdapter):
             num_class=cfg.CORRUPTION.NUM_CLASS,
             lambda_t=cfg.ADAPTER.RoTTA.LAMBDA_T,
             lambda_u=cfg.ADAPTER.RoTTA.LAMBDA_U,
+            max_bank_num=cfg.ADAPTER.MYTTA.MAX_MEMORY_BANKS, 
         )
-
         # Initialize step counter
         self.step = 0
 
@@ -183,7 +183,7 @@ class MyTTA(BaseAdapter):
 
         # Add each sample to memory as before
         for i, data in enumerate(batch_data):
-            self.short_term_memory.add_instance((data, pseudo_lbls[i].item(), entropy[i].item(), label[i]))
+            self.short_term_memory.add_instance_v2((data, pseudo_lbls[i].item(), entropy[i].item(), label[i]))
         self.show_mem_info()
 
         # Get the support data from shor-term memory
