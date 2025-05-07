@@ -164,7 +164,7 @@ class ShortTermMemory:
             target_bank = best_bank
 
         # Step 3: Score the item and attempt to insert
-        class_idx = true_label
+        class_idx = prediction
         new_score = self.heuristic_score(age=0, uncertainty=uncertainty, data=x, bank=target_bank)
 
         if self.remove_instance(target_bank, class_idx, new_score):

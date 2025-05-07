@@ -6,7 +6,7 @@ def main():
     parser = argparse.ArgumentParser(description="Append round-wise error rates to performance.csv with method label.")
     parser.add_argument("csv_path", type=str, help="Path to input CSV")
     parser.add_argument("method", type=str, help="Name of the method (will be the first column)")
-    parser.add_argument("--out_csv", type=str, default="performance.csv", help="Path to output CSV")
+    parser.add_argument("out_csv", type=str, default="performance.csv", help="Path to output CSV")
     args = parser.parse_args()
 
     # Load input CSV
