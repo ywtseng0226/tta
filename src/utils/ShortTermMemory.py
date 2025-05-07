@@ -39,6 +39,7 @@ class ShortTermMemory:
         self.eta = eta
         self.base_threshold = base_threshold
         self.banks = []  # memory banks (clusters)
+        self.num_consolidations = 0
 
     # Compute feature descriptor for a single image: (mean, var) over channels
     def compute_instance_descriptor(self, data):
@@ -66,7 +67,6 @@ class ShortTermMemory:
         bank_concat = torch.cat([bank_mean, bank_var])
         return torch.norm(inst_concat - bank_concat, p=2)
 
-
     # Get adaptive threshold for deciding if a sample fits into a bank
     def get_dynamic_threshold(self, bank):
         bank_descriptor = bank["descriptor"]
@@ -77,6 +77,7 @@ class ShortTermMemory:
         return self.base_threshold * (1 + avg_std)
 
     def consolidation(self):
+        self.num_consolidations += 1
         min_dist = float("inf")
         pair_to_merge = None
 
@@ -119,42 +120,6 @@ class ShortTermMemory:
 
         bank_i["items"] = new_class_items
         self.update_bank_descriptor(bank_i)
-
-    def add_instance(self, instance):
-        x, pred, uncert, label = instance
-        new_item = MemoryItem(data=x, uncert=uncert, age=0, label=label)
-        instance_descriptor = self.compute_instance_descriptor(x)
-
-        # Find the closest matching bank
-        target_bank, target_distance = None, float('inf')
-        for bank in self.banks:
-            bank_descriptor = bank["descriptor"]
-            dist = self.descriptor_distance(instance_descriptor, bank_descriptor)
-            if dist < target_distance:
-                target_distance = dist
-                target_bank = bank
-        
-        # Do we need to add a new bank?
-        if target_bank is None or (target_distance > self.get_dynamic_threshold(target_bank)):
-            new_bank = {
-                    "items": [[] for _ in range(self.num_class)],
-                    "descriptor": instance_descriptor
-                }
-            self.banks.append(new_bank)
-            target_bank = new_bank
-            if len(self.banks) > self.max_bank_num: 
-                self.consolidation()
-        
-        # Score the item and attempt to insert
-        class_idx = pred
-        new_score = self.heuristic_score(age=0, uncert=uncert, data=x, bank=target_bank)
-
-        if self.remove_instance(target_bank, class_idx, new_score):
-            target_bank["items"][class_idx].append(new_item)
-            self.update_bank_descriptor(target_bank)
-
-        # Step 4: Increment age of all samples in the target bank
-        self.add_age(target_bank)
 
     def remove_instance(self, bank, cls, new_score):
         """
@@ -212,6 +177,42 @@ class ShortTermMemory:
                 self.lambda_d * distance
         return score
 
+    def add_instance(self, instance):
+        x, pred, uncert, label = instance
+        new_item = MemoryItem(data=x, uncert=uncert, age=0, label=label)
+        instance_descriptor = self.compute_instance_descriptor(x)
+
+        # Find the closest matching bank
+        target_bank, target_distance = None, float('inf')
+        for bank in self.banks:
+            bank_descriptor = bank["descriptor"]
+            dist = self.descriptor_distance(instance_descriptor, bank_descriptor)
+            if dist < target_distance:
+                target_distance = dist
+                target_bank = bank
+        
+        # Do we need to add a new bank?
+        if target_bank is None or (target_distance > self.get_dynamic_threshold(target_bank)):
+            new_bank = {
+                    "items": [[] for _ in range(self.num_class)],
+                    "descriptor": instance_descriptor
+                }
+            self.banks.append(new_bank)
+            target_bank = new_bank
+            if len(self.banks) > self.max_bank_num: 
+                self.consolidation()
+        
+        # Score the item and attempt to insert
+        class_idx = pred
+        new_score = self.heuristic_score(age=0, uncert=uncert, data=x, bank=target_bank)
+
+        if self.remove_instance(target_bank, class_idx, new_score):
+            target_bank["items"][class_idx].append(new_item)
+            self.update_bank_descriptor(target_bank)
+
+        # Increment age of all samples in the target bank
+        self.add_age(target_bank)
+
     def get_sup_data(self, batch_samples, topk=3, max_samples=64):
         """
         Select top-K banks based on total distance to all samples in the batch,
@@ -229,14 +230,14 @@ class ShortTermMemory:
         if not self.banks:
             return [], []
 
-        # Step 1: Compute descriptor (mean, var) for each sample
+        # Compute descriptor (mean, var) for each sample
         sample_descriptors = []
         for i in range(batch_samples.shape[0]):
             mean = torch.mean(batch_samples[i], dim=(1, 2))  # (C,)
             var = torch.var(batch_samples[i], dim=(1, 2))    # (C,)
             sample_descriptors.append((mean, var))
 
-        # Step 2: Compute total distance to each bank
+        # Compute total distance to each bank
         total_dists = []
         valid_bank_ids = []
 
@@ -252,21 +253,21 @@ class ShortTermMemory:
         if not total_dists:
             return [], []
 
-        # Step 3: Get top-K banks by lowest total distance
+        # Get top-K banks by lowest total distance
         sorted_ids = sorted(zip(valid_bank_ids, total_dists), key=lambda x: x[1])
         topk_bank_ids = [bank_id for bank_id, _ in sorted_ids[:topk]]
 
-        # Step 4: Collect memory items from selected banks
+        # ollect memory items from selected banks
         selected_items = []
         for bank_id in topk_bank_ids:
             for cls_items in self.banks[bank_id]["items"]:
                 selected_items.extend(cls_items)
 
-        # Step 5: Limit to max_samples with random shuffle
+        # Limit to max_samples with random shuffle
         random.shuffle(selected_items)
         selected_items = selected_items[:max_samples]
 
-        # Step 6: Build outputs
+        # Build outputs
         sup_data = [item.data for item in selected_items]
         sup_age = [item.age for item in selected_items]
 

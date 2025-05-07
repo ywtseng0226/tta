@@ -1,8 +1,8 @@
 MODEL:
   ARCH: Standard
 
-TTA_DATA_DIR: /mnt/data0-nfs/shared-datasets/
-SRC_DATA_DIR: /mnt/data0-nfs/shared-datasets/CIFAR
+TTA_DATA_DIR: /home/ywt/research/25-NeurIPS-TTA/datasets/CIFAR-10
+SRC_DATA_DIR: /home/ywt/research/25-NeurIPS-TTA/datasets/CIFAR-10
 
 CORRUPTION:
   DATASET: cifar10c_recur

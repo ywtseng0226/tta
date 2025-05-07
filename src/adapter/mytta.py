@@ -145,6 +145,8 @@ class MyTTA(BaseAdapter):
     def show_mem_info(self):
         # ✅ Check short-term memory status
         print(f"[ShortTermMemory] Total Banks: {len(self.short_term_memory.banks)}")
+        print(f"[ShortTermMemory] Consolidations: {self.short_term_memory.num_consolidations}")
+
         for i, bank in enumerate(self.short_term_memory.banks):
             total = 0
             age_list = []
@@ -183,11 +185,12 @@ class MyTTA(BaseAdapter):
 
         # Add each sample to memory as before
         for i, data in enumerate(batch_data):
-            self.short_term_memory.add_instance_v2((data, pseudo_lbls[i].item(), entropy[i].item(), label[i]))
+            self.short_term_memory.add_instance((data, pseudo_lbls[i].item(), entropy[i].item(), label[i]))
         self.show_mem_info()
+        
 
         # Get the support data from shor-term memory
-        sup_data, _ = self.short_term_memory.get_sup_data(data_tensor) 
+        sup_data, _ = self.short_term_memory.get_sup_data(data_tensor, topk=self.cfg.ADAPTER.MYTTA.SEL_TOPK_BANKS) 
         sup_data = torch.stack(sup_data)
 
         # Get predictions from student and teacher models
