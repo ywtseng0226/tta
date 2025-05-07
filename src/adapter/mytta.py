@@ -186,7 +186,7 @@ class MyTTA(BaseAdapter):
         # Add each sample to memory as before
         for i, data in enumerate(batch_data):
             self.short_term_memory.add_instance((data, pseudo_lbls[i].item(), entropy[i].item(), label[i]))
-        self.show_mem_info()
+        # self.show_mem_info()
         
 
         # Get the support data from shor-term memory

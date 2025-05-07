@@ -28,7 +28,7 @@ class MemoryItem:
 # MyTTAMemory: memory bank for adaptive sample selection at test time
 class ShortTermMemory:
     def __init__(self, capacity, num_class, lambda_t=1.0, lambda_u=1.0, lambda_d=1.0,
-                 max_bank_num=1, eta=0.1, base_threshold=0.5, ):
+                 max_bank_num=1, eta=0.1, base_threshold=0.4, ):
         self.capacity = capacity  # total memory capacity
         self.num_class = num_class
         self.per_class = capacity / num_class  # class-wise quota
