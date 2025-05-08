@@ -9,18 +9,16 @@ from collections import Counter
 
 # MemoryItem: stores one sample and its meta info in memory bank
 class MemoryItem:
-    def __init__(self, data=None, uncert=0, age=0, label=None):
+    def __init__(self, data=None, uncert=0, age=0, label=None, domain=None):
         self.data = data
         self.uncert = uncert
         self.age = age
         self.label = label
+        self.domain = domain 
 
     def increase_age(self):
         if not self.empty():
             self.age += 1
-
-    def get_data(self):
-        return self.data, self.uncert, self.age
 
     def empty(self):
         return self.data == "empty"
@@ -28,7 +26,7 @@ class MemoryItem:
 # MyTTAMemory: memory bank for adaptive sample selection at test time
 class ShortTermMemory:
     def __init__(self, capacity, num_class, lambda_t=1.0, lambda_u=1.0, lambda_d=1.0,
-                 max_bank_num=1, eta=0.1, base_threshold=0.4, ):
+                 max_bank_num=1, eta=0.1, base_threshold=0.3, ):
         self.capacity = capacity  # total memory capacity
         self.num_class = num_class
         self.per_class = capacity / num_class  # class-wise quota
@@ -178,8 +176,8 @@ class ShortTermMemory:
         return score
 
     def add_instance(self, instance):
-        x, pred, uncert, label = instance
-        new_item = MemoryItem(data=x, uncert=uncert, age=0, label=label)
+        x, pred, uncert, label, domain = instance
+        new_item = MemoryItem(data=x, uncert=uncert, age=0, label=label, domain=domain)
         instance_descriptor = self.compute_instance_descriptor(x)
 
         # Find the closest matching bank

@@ -155,8 +155,8 @@ class PeTTA(BaseAdapter):
         for i, data in enumerate(batch_data):
             self.sample_mem.add_instance((data, pseudo_lbls[i].item(), entropy[i].item(), label[i]))
 
-        if self.step % self.update_frequency == 0:
-            self.print_memory_status()
+        # if self.step % self.update_frequency == 0:
+        #     self.print_memory_status()
 
         sup_data, _ = self.sample_mem.get_memory()
         sup_data = torch.stack(sup_data)

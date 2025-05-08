@@ -3,8 +3,11 @@ import torch
 import torch.nn as nn
 import tqdm
 import torch.nn.functional as F
-from src.adapter.base_adapter import BaseAdapter
+import numpy as np
+import matplotlib.pyplot as plt
 
+from sklearn.decomposition import PCA
+from src.adapter.base_adapter import BaseAdapter
 from src.utils.loss_func import self_training, softmax_entropy
 from src.utils import set_named_submodule, get_named_submodule
 from src.utils import PeTTAMemory, ShortTermMemory, mytta_memory
@@ -168,6 +171,64 @@ class MyTTA(BaseAdapter):
             print(f"    Class-wise counts: {class_counts}")
             print(f"    Age -> min: {min_age}, max: {max_age}, avg: {avg_age:.2f}")
 
+    def visualize_memory(self, memory, step):
+        """
+        Visualizes the memory items using PCA-reduced 2D features.
+        Points are colored by their memory bank ID (0–4) and saved to file.
+        """
+        if step % 50 != 0:
+            return
+
+        features = []
+        bank_ids = []
+
+        for bank_id, bank in enumerate(memory.banks):
+            for cls_items in bank["items"]:
+                for item in cls_items:
+                    if item.data is not None:
+                        feat = torch.mean(item.data, dim=(1, 2)).cpu().numpy()  # (C,)
+                        features.append(feat)
+                        bank_ids.append(bank_id)
+
+        if not features:
+            print("Memory is empty. Nothing to visualize.")
+            return
+
+        features = np.stack(features)
+        bank_ids = np.array(bank_ids)
+
+        # PCA reduction
+        pca = PCA(n_components=2)
+        features_2d = pca.fit_transform(features)
+
+        # Visualization
+        plt.figure(figsize=(8, 6))
+        scatter = plt.scatter(
+            features_2d[:, 0],
+            features_2d[:, 1],
+            c=bank_ids,
+            cmap=plt.get_cmap("tab10", 5),  # fix 5 colors for bank ID 0–4
+            alpha=0.7
+        )
+        cbar = plt.colorbar(scatter, ticks=range(5))  # ensure ticks show 0–4
+        cbar.set_label("Bank ID")
+
+        plt.title(f"Memory Visualization @ Step {step}")
+        plt.xlabel("PCA Component 1")
+        plt.ylabel("PCA Component 2")
+        plt.grid(True)
+
+        plt.xlim(-1, 1)
+        plt.ylim(-0.5, 0.5)
+        plt.tight_layout()
+
+        # Save to file
+        vis_dir = os.path.join(self.cfg.OUTPUT_DIR, "memory_vis")
+        os.makedirs(vis_dir, exist_ok=True)
+        vis_path = os.path.join(vis_dir, f"memory_vis_step_{step:05d}.png")
+        plt.savefig(vis_path)
+        plt.close()
+
     @torch.enable_grad()
     def forward_and_adapt(self, batch_data, model, optimizer, label):
         self.step += 1
@@ -185,9 +246,10 @@ class MyTTA(BaseAdapter):
 
         # Add each sample to memory as before
         for i, data in enumerate(batch_data):
-            self.short_term_memory.add_instance((data, pseudo_lbls[i].item(), entropy[i].item(), label[i]))
-        # self.show_mem_info()
+            self.short_term_memory.add_instance((data, pseudo_lbls[i].item(), entropy[i].item(), label['label'][i].item(), label['domain'][i].item()))
         
+        # self.show_mem_info()
+        self.visualize_memory(self.short_term_memory, self.step)
 
         # Get the support data from shor-term memory
         sup_data, _ = self.short_term_memory.get_sup_data(data_tensor, topk=self.cfg.ADAPTER.MYTTA.SEL_TOPK_BANKS) 

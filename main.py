@@ -38,12 +38,13 @@ def recurring_test_time_adaptation(cfg):
     tbar = tqdm(loader, dynamic_ncols=True, leave=True, ncols=100)
     for batch_id, data_package in enumerate(tbar):
         data, label, domain = data_package["image"], data_package['label'], data_package['domain']
-        
+
         if len(label) == 1: 
             continue  # ignore the final single point
         
         data, label = data.cuda(), label.cuda()
-        output = tta_model(data, label=label)
+        meta = {"label": label, "domain": domain}
+        output = tta_model(data, label=meta)
         
         outputs_arr.append(output.detach().cpu().numpy())
         labels_arr.append(label.detach().cpu().numpy())
