@@ -16,23 +16,20 @@ ADAPTER:
 
   RoTTA:
     MEMORY_SIZE: 64
-    UPDATE_FREQUENCY: 1
+    UPDATE_FREQUENCY: 64
     
   PETTA:
     ALPHA_0: 0.001
     LAMBDA_0: 10.0
     REGULARIZER: "cosine"
-    ## adaptive learning 
     ADAPTIVE_LAMBDA: True
     ADAPTIVE_ALPHA: True
-    
     NORM_LAYER: "rbn"
     
 LOADER:
   SAMPLER:
-    GAMMA: 0.01
     # TYPE: "class_temporal"
+    GAMMA: 0.01
     TYPE: "cgs"
-
 
     

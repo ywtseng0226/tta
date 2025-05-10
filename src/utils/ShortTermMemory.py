@@ -3,10 +3,6 @@ import torch.nn.functional as F
 import math
 import random
 
-from copy import deepcopy
-from torch import nn
-from collections import Counter
-
 # MemoryItem: stores one sample and its meta info in memory bank
 class MemoryItem:
     def __init__(self, data=None, uncert=0, age=0, label=None, domain=None):
@@ -175,20 +171,6 @@ class ShortTermMemory:
                 self.lambda_d * distance
         return score
     
-    # def heuristic_score(self, age, uncert, data, bank):
-    #     """
-    #     Heuristic score without age.
-    #     Lower score means higher priority to be kept.
-    #     """
-    #     u_prime = uncert / math.log(self.num_class)
-    #     d_prime = self.descriptor_distance(self.compute_instance_descriptor(data), bank["descriptor"])
-
-    #     raw_scores = torch.tensor([self.lambda_u * u_prime, self.lambda_d * d_prime])
-    #     weights = F.softmax(raw_scores, dim=0)  # returns 2 values summing to 1
-
-    #     score = weights[0] * u_prime + weights[1] * d_prime
-    #     return score.item()
-
     def add_instance(self, instance):
         x, pred, uncert, label, domain = instance
         new_item = MemoryItem(data=x, uncert=uncert, age=0, label=label, domain=domain)
@@ -223,7 +205,8 @@ class ShortTermMemory:
             self.update_bank_descriptor(target_bank)
 
         # Increment age of all samples in the target bank
-        self.add_age(target_bank)
+        for bank in self.banks:
+            self.add_age(bank)
 
     def get_sup_data(self, batch_samples, topk=3, max_samples=64):
         """

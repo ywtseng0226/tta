@@ -56,7 +56,9 @@ class MyTTA(BaseAdapter):
             lambda_t=cfg.ADAPTER.RoTTA.LAMBDA_T,
             lambda_u=cfg.ADAPTER.RoTTA.LAMBDA_U,
             max_bank_num=cfg.ADAPTER.MYTTA.MAX_MEMORY_BANKS, 
+            base_threshold=cfg.ADAPTER.MYTTA.BASE_THRESHOLD,
         )
+        
         # Initialize step counter
         self.step = 0
 
@@ -272,7 +274,7 @@ class MyTTA(BaseAdapter):
             self.short_term_memory.add_instance((data, pseudo_lbls[i].item(), entropy[i].item(), label['label'][i].item(), label['domain'][i].item()))
         
         #### visualization
-        self.show_mem_info()
+        # self.show_mem_info()
         # self.visualize_memory(self.short_term_memory, self.step)
 
         # Get the support data from shor-term memory

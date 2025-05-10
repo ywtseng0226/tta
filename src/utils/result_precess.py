@@ -42,6 +42,7 @@ class AvgResultProcessor:
             if c not in self.label2name.keys():
                 continue
             t.add_row([self.label2name[c], f"{self.result_per_class[c] * 100:.2f}", f"{(1 - self.result_per_class[c]) * 100:.2f}"])
+        
         # avg is the total avg
         avg = sum(self.all_accurate) / len(self.all_accurate)
         t.add_row(["Total Avg", f"{avg * 100:.2f}", f"{(1 - avg) * 100:.2f}"])

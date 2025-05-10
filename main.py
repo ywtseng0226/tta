@@ -10,9 +10,55 @@ from setproctitle import setproctitle
 import numpy as np
 import os.path as osp
 import os
+import matplotlib.pyplot as plt
 import torch.multiprocessing
 import pandas as pd
 from src.utils import set_random_seed
+
+def plot_error_trend(error_rates, output_dir, filename="tta_error_trend.png"):
+    """
+    Plot batch-wise error rates and save as a figure.
+
+    Args:
+        error_rates (list[float]): A list of error rate values (one per batch).
+        output_dir (str): Directory to save the output figure.
+        filename (str): Name of the figure file (default: "tta_error_trend.png").
+    """
+    if not error_rates:
+        print("No error rate data to plot.")
+        return
+
+    plt.figure(figsize=(10, 4))
+    plt.plot(error_rates, color='tab:red', linewidth=1.5)
+    plt.xlabel("Batch Index", fontsize=12)
+    plt.ylabel("Error Rate", fontsize=12)
+    plt.title("TTA Batch-wise Error Rate Trend", fontsize=14)
+    plt.grid(True, linestyle="--", alpha=0.5)
+    plt.tight_layout()
+
+    os.makedirs(output_dir, exist_ok=True)
+    save_path = os.path.join(output_dir, filename)
+    plt.savefig(save_path, dpi=150)
+    plt.close()
+    print(f"[✓] Saved error trend plot to: {save_path}")
+
+def save_error_trend_to_csv(error_rates, output_dir, filename="tta_error_trend.csv"):
+    """
+    Save batch-wise error rates to a CSV file.
+
+    Args:
+        error_rates (list[float]): A list of error rate values (one per batch).
+        output_dir (str): Directory to save the CSV file.
+        filename (str): Name of the CSV file (default: "tta_error_trend.csv").
+    """
+    df = pd.DataFrame({
+        "Batch Index": list(range(len(error_rates))),
+        "Error Rate": error_rates
+    })
+    os.makedirs(output_dir, exist_ok=True)
+    save_path = os.path.join(output_dir, filename)
+    df.to_csv(save_path, index=False)
+    print(f"[✓] Saved error trend CSV to: {save_path}")
 
 def recurring_test_time_adaptation(cfg):
     # Building model, optimizer and adapter:
@@ -32,6 +78,7 @@ def recurring_test_time_adaptation(cfg):
     # Save logs
     outputs_arr = []
     labels_arr = []
+    batch_error_rates = []
     
     # Main test-time Adaptation loop 
     tbar = tqdm(loader, dynamic_ncols=True, leave=True, ncols=100)
@@ -50,6 +97,8 @@ def recurring_test_time_adaptation(cfg):
         
         predict = torch.argmax(output, dim=1)
         accurate = (predict == label)
+        error_rate = 1.0 - accurate.float().mean().item()
+        batch_error_rates.append(error_rate)
         processor.process(accurate, domain)
 
         tbar.set_postfix(acc=processor.cumulative_acc())
@@ -59,6 +108,11 @@ def recurring_test_time_adaptation(cfg):
 
     processor.calculate()
     _, prcss_eval_csv = processor.info()
+
+    # plotting and saving error trend
+    plot_error_trend(error_rates=batch_error_rates, output_dir=cfg.OUTPUT_DIR)
+    save_error_trend_to_csv(error_rates=batch_error_rates, output_dir=cfg.OUTPUT_DIR)
+
     return prcss_eval_csv, tta_model
 
 def main():

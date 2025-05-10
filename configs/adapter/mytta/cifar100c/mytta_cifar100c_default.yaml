@@ -15,8 +15,8 @@ ADAPTER:
   NAME: mytta
 
   RoTTA:
-    MEMORY_SIZE: 64
-    UPDATE_FREQUENCY: 64
+    MEMORY_SIZE: 32
+    UPDATE_FREQUENCY: 32
   
   PETTA:
     ALPHA_0: 0.001
@@ -29,8 +29,7 @@ ADAPTER:
   MYTTA:
     MAX_MEMORY_BANKS: 5
     SEL_TOPK_BANKS: 5
-    DOMAIN_THRESHOLD: 1.0
-    BETA: 0.5
+    BASE_THRESHOLD: 0.3
     ALPHA_0: 0.001
     LAMBDA_0: 10.0
     REGULARIZER: "cosine"
@@ -41,5 +40,5 @@ ADAPTER:
     
 LOADER:
   SAMPLER:
-    # TYPE: "class_temporal"
-    TYPE: "cgs"
+    TYPE: "class_temporal"
+    # TYPE: "cgs"
