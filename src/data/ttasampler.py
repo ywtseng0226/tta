@@ -158,14 +158,6 @@ class GaussianCGSSampler(Sampler):
             # Assign sample count to each domain
             domain_counts = (weights * self.batch_size).astype(int)
 
-            # === New: Group 150 domains back to 15 corruption types ===
-            # corruption_counts = np.zeros(15, dtype=int)
-            # for domain_id, count in zip(self.domains, domain_counts):
-            #     corruption_id = domain_id % 15  # Take modulo 15 to map domain to corruption type
-            #     corruption_counts[corruption_id] += count
-            # self.corruption_counts_list.append(corruption_counts.copy())
-
-
             # Correction to ensure total = batch size
             diff = self.batch_size - domain_counts.sum()
             if diff > 0:

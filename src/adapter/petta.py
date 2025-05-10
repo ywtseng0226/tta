@@ -153,7 +153,7 @@ class PeTTA(BaseAdapter):
             entropy = torch.sum(-predict * torch.log(predict + 1e-6), dim=1)
 
         for i, data in enumerate(batch_data):
-            self.sample_mem.add_instance((data, pseudo_lbls[i].item(), entropy[i].item(), label[i]))
+            self.sample_mem.add_instance((data, pseudo_lbls[i].item(), entropy[i].item(), label['label'][i]))
 
         # if self.step % self.update_frequency == 0:
         #     self.print_memory_status()

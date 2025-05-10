@@ -4,36 +4,29 @@ import os
 import matplotlib.pyplot as plt
 
 def main():
-    parser = argparse.ArgumentParser(description="Visualize domain-wise error rates from two CSV files with average lines (no legend for avg lines).")
-    parser.add_argument("csv_path1", type=str, help="Path to first CSV file")
-    parser.add_argument("csv_path2", type=str, help="Path to second CSV file")
+    parser = argparse.ArgumentParser(description="Visualize domain-wise error rates from multiple CSV files with average lines.")
+    parser.add_argument("csv_paths", type=str, nargs="+", help="Paths to one or more CSV files")
     args = parser.parse_args()
 
-    # Load CSVs
-    df1 = pd.read_csv(args.csv_path1)
-    df2 = pd.read_csv(args.csv_path2)
-
-    if "Error Rate" not in df1.columns or "Error Rate" not in df2.columns:
-        raise ValueError("Expected column 'Error Rate' not found in one or both CSV files.")
-
-    # Extract values
-    error_rates1 = df1["Error Rate"].values
-    error_rates2 = df2["Error Rate"].values
-    domain_ids = list(range(len(error_rates1)))
-
-    avg1 = error_rates1.mean()
-    avg2 = error_rates2.mean()
-
-    # Plot
     plt.figure(figsize=(12, 5))
-    label1 = os.path.basename(args.csv_path1)
-    label2 = os.path.basename(args.csv_path2)
+    all_avgs = []
 
-    plt.plot(domain_ids, error_rates1, linestyle='-', color='tab:blue', label=label1)
-    plt.plot(domain_ids, error_rates2, linestyle='-', color='tab:orange', label=label2)
+    for i, csv_path in enumerate(args.csv_paths):
+        df = pd.read_csv(csv_path)
 
-    plt.axhline(avg1, color='tab:blue', linestyle='--', linewidth=1.5)
-    plt.axhline(avg2, color='tab:orange', linestyle='--', linewidth=1.5)
+        if "Error Rate" not in df.columns:
+            raise ValueError(f"[✗] 'Error Rate' column not found in {csv_path}")
+
+        error_rates = df["Error Rate"].values
+        domain_ids = list(range(len(error_rates)))
+        avg = error_rates.mean()
+        all_avgs.append(avg)
+
+        label = os.path.basename(csv_path)
+        color = f"tab:{['blue', 'orange', 'green', 'red', 'purple', 'brown', 'pink', 'gray'][i % 8]}"
+
+        plt.plot(domain_ids, error_rates, linestyle='-', color=color, label=label)
+        plt.axhline(avg, color=color, linestyle='--', linewidth=1.5)
 
     # Aesthetics
     plt.title("Domain-wise Error Rate Comparison", fontsize=14, fontweight='bold')
@@ -44,9 +37,9 @@ def main():
     plt.tight_layout()
 
     # Save figure
-    output_dir = os.path.dirname(args.csv_path1)
+    output_dir = os.path.dirname(args.csv_paths[0])
     os.makedirs(output_dir, exist_ok=True)
-    save_path = os.path.join(output_dir, "error_trend_compare_avg.png")
+    save_path = os.path.join(output_dir, f"error_trend_compare_{len(args.csv_paths)}files.png")
     plt.savefig(save_path, dpi=150)
     print(f"[✓] Saved plot to: {save_path}")
     plt.show()

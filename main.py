@@ -33,8 +33,7 @@ def recurring_test_time_adaptation(cfg):
     outputs_arr = []
     labels_arr = []
     
-    # Main test-time Adaptation loop # (The main for-loop on line #2 of Alg. 1)
-    # tbar = tqdm(loader)
+    # Main test-time Adaptation loop 
     tbar = tqdm(loader, dynamic_ncols=True, leave=True, ncols=100)
     for batch_id, data_package in enumerate(tbar):
         data, label, domain = data_package["image"], data_package['label'], data_package['domain']

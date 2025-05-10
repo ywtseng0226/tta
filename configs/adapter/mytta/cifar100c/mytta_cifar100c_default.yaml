@@ -28,7 +28,7 @@ ADAPTER:
   
   MYTTA:
     MAX_MEMORY_BANKS: 5
-    SEL_TOPK_BANKS: 3
+    SEL_TOPK_BANKS: 5
     DOMAIN_THRESHOLD: 1.0
     BETA: 0.5
     ALPHA_0: 0.001
@@ -41,5 +41,5 @@ ADAPTER:
     
 LOADER:
   SAMPLER:
-    TYPE: "class_temporal"
-    # TYPE: "cgs"
+    # TYPE: "class_temporal"
+    TYPE: "cgs"

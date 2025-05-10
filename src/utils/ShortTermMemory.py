@@ -174,6 +174,20 @@ class ShortTermMemory:
                 self.lambda_u * (uncert / math.log(self.num_class)) + \
                 self.lambda_d * distance
         return score
+    
+    # def heuristic_score(self, age, uncert, data, bank):
+    #     """
+    #     Heuristic score without age.
+    #     Lower score means higher priority to be kept.
+    #     """
+    #     u_prime = uncert / math.log(self.num_class)
+    #     d_prime = self.descriptor_distance(self.compute_instance_descriptor(data), bank["descriptor"])
+
+    #     raw_scores = torch.tensor([self.lambda_u * u_prime, self.lambda_d * d_prime])
+    #     weights = F.softmax(raw_scores, dim=0)  # returns 2 values summing to 1
+
+    #     score = weights[0] * u_prime + weights[1] * d_prime
+    #     return score.item()
 
     def add_instance(self, instance):
         x, pred, uncert, label, domain = instance

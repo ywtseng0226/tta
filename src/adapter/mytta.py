@@ -146,74 +146,97 @@ class MyTTA(BaseAdapter):
         return ema_model
     
     def show_mem_info(self):
-        # ✅ Check short-term memory status
+        """
+        Show memory statistics including age, class count, and score stats per bank.
+        """
         print(f"[ShortTermMemory] Total Banks: {len(self.short_term_memory.banks)}")
         print(f"[ShortTermMemory] Consolidations: {self.short_term_memory.num_consolidations}")
 
         for i, bank in enumerate(self.short_term_memory.banks):
             total = 0
             age_list = []
+            score_list = []
             class_counts = []
-            for cls_items in bank["items"]:
+
+            for cls_id, cls_items in enumerate(bank["items"]):
                 class_counts.append(len(cls_items))
                 total += len(cls_items)
-                age_list.extend([item.age for item in cls_items])
+                for item in cls_items:
+                    age_list.append(item.age)
+                    score = self.short_term_memory.heuristic_score(
+                        age=item.age,
+                        uncert=item.uncert,
+                        data=item.data,
+                        bank=bank
+                    )
+                    score_list.append(score.item())
 
             if age_list:
-                min_age = min(age_list)
-                max_age = max(age_list)
-                avg_age = sum(age_list) / len(age_list)
+                min_age, max_age, avg_age = min(age_list), max(age_list), sum(age_list) / len(age_list)
             else:
                 min_age = max_age = avg_age = 0
+
+            if score_list:
+                score_arr = np.array(score_list)
+                min_score, max_score, avg_score = score_arr.min(), score_arr.max(), score_arr.mean()
+            else:
+                min_score = max_score = avg_score = 0.0
 
             print(f"  Bank {i}:")
             print(f"    Total samples: {total}")
             print(f"    Class-wise counts: {class_counts}")
             print(f"    Age -> min: {min_age}, max: {max_age}, avg: {avg_age:.2f}")
+            print(f"    Score -> min: {min_score:.4f}, max: {max_score:.4f}, avg: {avg_score:.4f}")
 
     def visualize_memory(self, memory, step):
         """
         Visualizes the memory items using PCA-reduced 2D features.
-        Points are colored by their memory bank ID (0–4) and saved to file.
+        Points are colored by their domain ID and saved to file.
         """
         if step % 50 != 0:
             return
 
         features = []
-        bank_ids = []
+        domain_ids = []
 
-        for bank_id, bank in enumerate(memory.banks):
+        for bank in memory.banks:
             for cls_items in bank["items"]:
                 for item in cls_items:
                     if item.data is not None:
                         feat = torch.mean(item.data, dim=(1, 2)).cpu().numpy()  # (C,)
                         features.append(feat)
-                        bank_ids.append(bank_id)
+                        domain_ids.append(item.domain)
 
         if not features:
             print("Memory is empty. Nothing to visualize.")
             return
 
         features = np.stack(features)
-        bank_ids = np.array(bank_ids)
+        domain_ids = np.array(domain_ids)
 
         # PCA reduction
         pca = PCA(n_components=2)
         features_2d = pca.fit_transform(features)
+
+        # Get sorted unique domain list for consistent color mapping
+        unique_domains = sorted(set(domain_ids))
+        domain_to_idx = {d: i for i, d in enumerate(unique_domains)}
+        color_indices = [domain_to_idx[d] for d in domain_ids]
 
         # Visualization
         plt.figure(figsize=(8, 6))
         scatter = plt.scatter(
             features_2d[:, 0],
             features_2d[:, 1],
-            c=bank_ids,
-            cmap=plt.get_cmap("tab10", 5),  # fix 5 colors for bank ID 0–4
+            c=color_indices,
+            cmap=plt.get_cmap("tab10", len(unique_domains)),
             alpha=0.7
         )
-        cbar = plt.colorbar(scatter, ticks=range(5))  # ensure ticks show 0–4
-        cbar.set_label("Bank ID")
+        cbar = plt.colorbar(scatter, ticks=range(len(unique_domains)))
+        cbar.set_label("Domain ID")
+        cbar.set_ticklabels(unique_domains)  # map back to real domain IDs
 
-        plt.title(f"Memory Visualization @ Step {step}")
+        plt.title(f"Memory Visualization by Domain @ Step {step}")
         plt.xlabel("PCA Component 1")
         plt.ylabel("PCA Component 2")
         plt.grid(True)
@@ -248,8 +271,9 @@ class MyTTA(BaseAdapter):
         for i, data in enumerate(batch_data):
             self.short_term_memory.add_instance((data, pseudo_lbls[i].item(), entropy[i].item(), label['label'][i].item(), label['domain'][i].item()))
         
-        # self.show_mem_info()
-        self.visualize_memory(self.short_term_memory, self.step)
+        #### visualization
+        self.show_mem_info()
+        # self.visualize_memory(self.short_term_memory, self.step)
 
         # Get the support data from shor-term memory
         sup_data, _ = self.short_term_memory.get_sup_data(data_tensor, topk=self.cfg.ADAPTER.MYTTA.SEL_TOPK_BANKS) 
