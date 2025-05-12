@@ -2,6 +2,7 @@ import torch
 import torch.nn.functional as F
 import math
 import random
+import numpy as np
 
 # MemoryItem: stores one sample and its meta info in memory bank
 class MemoryItem:
@@ -22,7 +23,7 @@ class MemoryItem:
 # MyTTAMemory: memory bank for adaptive sample selection at test time
 class ShortTermMemory:
     def __init__(self, capacity, num_class, lambda_t=1.0, lambda_u=1.0, lambda_d=1.0,
-                 max_bank_num=1, eta=0.1, base_threshold=0.3, ):
+                 max_bank_num=1, base_threshold=0.3, ):
         self.capacity = capacity  # total memory capacity
         self.num_class = num_class
         self.per_class = capacity / num_class  # class-wise quota
@@ -30,7 +31,6 @@ class ShortTermMemory:
         self.lambda_u = lambda_u  # uncertainty factor
         self.lambda_d = lambda_d  # distance factor
         self.max_bank_num = max_bank_num  # max number of banks
-        self.eta = eta
         self.base_threshold = base_threshold
         self.banks = []  # memory banks (clusters)
         self.num_consolidations = 0
@@ -70,7 +70,26 @@ class ShortTermMemory:
         avg_std = torch.mean(std).item()
         return self.base_threshold * (1 + avg_std)
 
-    def consolidation(self):
+    def get_bank_mean_descriptors(self):
+        """
+        Return a list of mean descriptors (mean over C) for each bank in the memory.
+
+        Returns:
+            List[Tensor]: list of tensors of shape (C,) representing mean descriptors per bank.
+        """
+        bank_means = []
+
+        for bank in self.banks:
+            desc = bank.get("descriptor", (None, None))
+            mean_desc = desc[0]  # shape: (C,)
+            if mean_desc is not None:
+                bank_means.append(mean_desc.clone().detach())  # clone for safety
+            else:
+                bank_means.append(None)
+
+        return bank_means
+
+    def consolidation_ori(self):
         self.num_consolidations += 1
         min_dist = float("inf")
         pair_to_merge = None
@@ -115,6 +134,53 @@ class ShortTermMemory:
         bank_i["items"] = new_class_items
         self.update_bank_descriptor(bank_i)
 
+    def consolidation(self):
+        self.num_consolidations += 1
+        min_dist = float("inf")
+        pair_to_merge = None
+
+        # Compare only adjacent pairs: (0,1), (1,2), ..., (n-2, n-1)
+        for i in range(len(self.banks) - 1):
+            desc_i = self.banks[i]["descriptor"]
+            desc_j = self.banks[i + 1]["descriptor"]
+            if desc_i[0] is None or desc_j[0] is None:
+                continue
+            dist = self.descriptor_distance(desc_i, desc_j)
+            if dist < min_dist:
+                min_dist = dist
+                pair_to_merge = (i, i + 1)
+
+        if pair_to_merge is None:
+            return
+
+        i, j = pair_to_merge
+        bank_i = self.banks[i]
+        bank_j = self.banks[j]
+
+        for cls in range(self.num_class):
+            bank_i["items"][cls].extend(bank_j["items"][cls])
+
+        del self.banks[j]  # delete bank_j after merging into bank_i
+
+        # Flatten items and filter by uncertainty if needed
+        all_items = []
+        for cls_items in bank_i["items"]:
+            all_items.extend(cls_items)
+
+        if len(all_items) > self.capacity:
+            all_items.sort(key=lambda item: item.uncert)
+            all_items = all_items[:self.capacity]
+
+        # Rebuild class-wise structure
+        new_class_items = [[] for _ in range(self.num_class)]
+        for item in all_items:
+            label = item.label
+            if len(new_class_items[label]) < self.per_class:
+                new_class_items[label].append(item)
+
+        bank_i["items"] = new_class_items
+        self.update_bank_descriptor(bank_i)
+
     def remove_instance(self, bank, cls, new_score):
         """
         Decide whether there's space to insert a new item in a class.
@@ -126,16 +192,13 @@ class ShortTermMemory:
 
         if class_occupied < self.per_class:
             if all_occupancy < self.capacity:
-                return True
+                return True, None
             else:
-                # Too full, consider replacing from majority classes
-                max_count = max(len(lst) for lst in bank["items"])
-                majority_classes = [i for i, lst in enumerate(bank["items"]) if len(lst) == max_count]
+                majority_classes = [i for i, lst in enumerate(bank["items"]) if len(lst) == max(len(x) for x in bank["items"])]
                 return self.remove_from_classes(bank, majority_classes, new_score)
         else:
-            # Class full, try to replace within the same class
             return self.remove_from_classes(bank, [cls], new_score)
-
+        
     def remove_from_classes(self, bank, classes, score_base):
         max_score = None
         max_class = None
@@ -151,10 +214,10 @@ class ShortTermMemory:
                     max_index = idx
 
         if max_class is not None and max_score > score_base:
-            bank["items"][max_class].pop(max_index)
-            return True
+            removed_item = bank["items"][max_class].pop(max_index)
+            return True, removed_item  # ✅ return the removed item
         else:
-            return False
+            return False, None
 
     def add_age(self, bank):
         for class_items in bank["items"]:
@@ -200,15 +263,17 @@ class ShortTermMemory:
         class_idx = pred
         new_score = self.heuristic_score(age=0, uncert=uncert, data=x, bank=target_bank)
 
-        if self.remove_instance(target_bank, class_idx, new_score):
+        inserted, removed_item = self.remove_instance(target_bank, class_idx, new_score)
+        if inserted:
             target_bank["items"][class_idx].append(new_item)
             self.update_bank_descriptor(target_bank)
 
-        # Increment age of all samples in the target bank
         for bank in self.banks:
             self.add_age(bank)
 
-    def get_sup_data(self, batch_samples, topk=3, max_samples=64):
+        return removed_item  
+
+    def get_sup_data(self, batch_samples, topk=3, max_samples=32):
         """
         Select top-K banks based on total distance to all samples in the batch,
         then sample up to `max_samples` for learning.
@@ -246,7 +311,7 @@ class ShortTermMemory:
             valid_bank_ids.append(bank_id)
 
         if not total_dists:
-            return [], []
+            return []
 
         # Get top-K banks by lowest total distance
         sorted_ids = sorted(zip(valid_bank_ids, total_dists), key=lambda x: x[1])
@@ -261,10 +326,59 @@ class ShortTermMemory:
         # Limit to max_samples with random shuffle
         random.shuffle(selected_items)
         selected_items = selected_items[:max_samples]
-
-        # Build outputs
         sup_data = [item.data for item in selected_items]
-        sup_age = [item.age for item in selected_items]
 
-        return sup_data, sup_age
+        return sup_data
+    
+    def show_memory_status(self):
+        """
+        Show memory statistics including age, class count, score stats, and domain distribution per bank.
+        """
+        print(f"[ShortTermMemory] Total Banks: {len(self.banks)}")
+        print(f"[ShortTermMemory] Consolidations: {self.num_consolidations}")
+
+        for i, bank in enumerate(self.banks):
+            total = 0
+            age_list = []
+            score_list = []
+            class_counts = []
+            domain_counts = {}
+
+            for cls_id, cls_items in enumerate(bank["items"]):
+                class_counts.append(len(cls_items))
+                total += len(cls_items)
+                for item in cls_items:
+                    # age
+                    age_list.append(item.age)
+                    # score
+                    score = self.heuristic_score(
+                        age=item.age,
+                        uncert=item.uncert,
+                        data=item.data,
+                        bank=bank
+                    )
+                    score_list.append(score.item())
+                    # domain
+                    domain = item.domain
+                    domain_counts[domain] = domain_counts.get(domain, 0) + 1
+
+            if age_list:
+                min_age, max_age, avg_age = min(age_list), max(age_list), sum(age_list) / len(age_list)
+            else:
+                min_age = max_age = avg_age = 0
+
+            if score_list:
+                score_arr = np.array(score_list)
+                min_score, max_score, avg_score = score_arr.min(), score_arr.max(), score_arr.mean()
+            else:
+                min_score = max_score = avg_score = 0.0
+
+            print(f"  Bank {i}:")
+            print(f"    Total samples: {total}")
+            # print(f"    Class-wise counts: {class_counts}")
+            print(f"    Age -> min: {min_age}, max: {max_age}, avg: {avg_age:.2f}")
+            # print(f"    Score -> min: {min_score:.4f}, max: {max_score:.4f}, avg: {avg_score:.4f}")
+            print(f"    Domain distribution:")
+            for domain, count in sorted(domain_counts.items()):
+                print(f"      Domain {domain}: {count}")
 

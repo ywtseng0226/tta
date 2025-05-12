@@ -15,4 +15,4 @@ fi
 python main.py \
       -acfg configs/adapter/$ADAPTER/$DATASET/$CONFIG.yaml \
       -dcfg configs/dataset/${DATASET}_recur=20.yaml \
-      OUTPUT_DIR outputs/${ADAPTER}/${DATASET}_recur10
+      OUTPUT_DIR outputs/${ADAPTER}/${DATASET}_recur20

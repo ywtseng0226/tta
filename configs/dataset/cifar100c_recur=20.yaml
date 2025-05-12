@@ -6,7 +6,7 @@ SRC_DATA_DIR: /home/ywt/research/25-NeurIPS-TTA/datasets/CIFAR-100
 
 CORRUPTION:
   DATASET: cifar100c_recur
-  RECUR: 5
+  RECUR: 20
   CGS: True
   NUM_CLASS: 100
   SEVERITY:

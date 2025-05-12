@@ -10,7 +10,7 @@ from sklearn.decomposition import PCA
 from src.adapter.base_adapter import BaseAdapter
 from src.utils.loss_func import self_training, softmax_entropy
 from src.utils import set_named_submodule, get_named_submodule
-from src.utils import PeTTAMemory, ShortTermMemory, mytta_memory
+from src.utils import PeTTAMemory, ShortTermMemory, LongTermMemory
 from src.utils.custom_transforms import get_tta_transforms
 from src.utils.bn_layers import RobustBN1d, RobustBN2d
 from src.utils.petta_utils import split_up_model, get_source_loader
@@ -51,14 +51,17 @@ class MyTTA(BaseAdapter):
         self.proto_mem = PeTTAMemory.PrototypeMemory(src_feat_mean, self.num_classes)
         self.divg_score = PeTTAMemory.DivergenceScore(src_feat_mean, src_feat_cov)
         self.short_term_memory = ShortTermMemory.ShortTermMemory(
-            capacity=self.cfg.ADAPTER.RoTTA.MEMORY_SIZE,
+            capacity=self.cfg.ADAPTER.MYTTA.STMEM_CAPACITY,
             num_class=cfg.CORRUPTION.NUM_CLASS,
             lambda_t=cfg.ADAPTER.RoTTA.LAMBDA_T,
             lambda_u=cfg.ADAPTER.RoTTA.LAMBDA_U,
-            max_bank_num=cfg.ADAPTER.MYTTA.MAX_MEMORY_BANKS, 
+            max_bank_num=cfg.ADAPTER.MYTTA.STMEM_MAX_CLUS, 
             base_threshold=cfg.ADAPTER.MYTTA.BASE_THRESHOLD,
         )
-        
+        self.long_term_memory = LongTermMemory.LongTermMemory(
+            capacity=self.cfg.ADAPTER.MYTTA.LTMEM_CAPACITY,
+            num_class=cfg.CORRUPTION.NUM_CLASS,
+        )
         # Initialize step counter
         self.step = 0
 
@@ -146,113 +149,64 @@ class MyTTA(BaseAdapter):
         for ema_param, param in zip(ema_model.parameters(), model.parameters()):
             ema_param.data[:] = (1 - alpha) * ema_param.data[:] + alpha * param.data[:]
         return ema_model
-    
-    def show_mem_info(self):
+
+    def visualize_support_data(self, short_data, long_data, step):
         """
-        Show memory statistics including age, class count, and score stats per bank.
+        Visualize support data from short-term and long-term memory using PCA.
+
+        Args:
+            short_data (list[Tensor])
+            long_data (list[Tensor])
+            step (int)
         """
-        print(f"[ShortTermMemory] Total Banks: {len(self.short_term_memory.banks)}")
-        print(f"[ShortTermMemory] Consolidations: {self.short_term_memory.num_consolidations}")
-
-        for i, bank in enumerate(self.short_term_memory.banks):
-            total = 0
-            age_list = []
-            score_list = []
-            class_counts = []
-
-            for cls_id, cls_items in enumerate(bank["items"]):
-                class_counts.append(len(cls_items))
-                total += len(cls_items)
-                for item in cls_items:
-                    age_list.append(item.age)
-                    score = self.short_term_memory.heuristic_score(
-                        age=item.age,
-                        uncert=item.uncert,
-                        data=item.data,
-                        bank=bank
-                    )
-                    score_list.append(score.item())
-
-            if age_list:
-                min_age, max_age, avg_age = min(age_list), max(age_list), sum(age_list) / len(age_list)
-            else:
-                min_age = max_age = avg_age = 0
-
-            if score_list:
-                score_arr = np.array(score_list)
-                min_score, max_score, avg_score = score_arr.min(), score_arr.max(), score_arr.mean()
-            else:
-                min_score = max_score = avg_score = 0.0
-
-            print(f"  Bank {i}:")
-            print(f"    Total samples: {total}")
-            print(f"    Class-wise counts: {class_counts}")
-            print(f"    Age -> min: {min_age}, max: {max_age}, avg: {avg_age:.2f}")
-            print(f"    Score -> min: {min_score:.4f}, max: {max_score:.4f}, avg: {avg_score:.4f}")
-
-    def visualize_memory(self, memory, step):
-        """
-        Visualizes the memory items using PCA-reduced 2D features.
-        Points are colored by their domain ID and saved to file.
-        """
-        if step % 50 != 0:
+        if not short_data and not long_data:
             return
 
-        features = []
-        domain_ids = []
+        all_feats = []
+        color_labels = []
 
-        for bank in memory.banks:
-            for cls_items in bank["items"]:
-                for item in cls_items:
-                    if item.data is not None:
-                        feat = torch.mean(item.data, dim=(1, 2)).cpu().numpy()  # (C,)
-                        features.append(feat)
-                        domain_ids.append(item.domain)
+        for data in short_data:
+            feat = torch.mean(data, dim=(1, 2)).cpu().numpy()  # (C,)
+            all_feats.append(feat)
+            color_labels.append(0)  # 0 = short-term
 
-        if not features:
-            print("Memory is empty. Nothing to visualize.")
-            return
+        for data in long_data:
+            feat = torch.mean(data, dim=(1, 2)).cpu().numpy()  # (C,)
+            all_feats.append(feat)
+            color_labels.append(1)  # 1 = long-term
 
-        features = np.stack(features)
-        domain_ids = np.array(domain_ids)
+        features = np.stack(all_feats)
+        color_labels = np.array(color_labels)
 
-        # PCA reduction
+        # PCA to 2D
         pca = PCA(n_components=2)
         features_2d = pca.fit_transform(features)
 
-        # Get sorted unique domain list for consistent color mapping
-        unique_domains = sorted(set(domain_ids))
-        domain_to_idx = {d: i for i, d in enumerate(unique_domains)}
-        color_indices = [domain_to_idx[d] for d in domain_ids]
+        plt.figure(figsize=(7, 6))
 
-        # Visualization
-        plt.figure(figsize=(8, 6))
-        scatter = plt.scatter(
-            features_2d[:, 0],
-            features_2d[:, 1],
-            c=color_indices,
-            cmap=plt.get_cmap("tab10", len(unique_domains)),
-            alpha=0.7
-        )
-        cbar = plt.colorbar(scatter, ticks=range(len(unique_domains)))
-        cbar.set_label("Domain ID")
-        cbar.set_ticklabels(unique_domains)  # map back to real domain IDs
+        # Plot each group separately for correct legend
+        short_mask = color_labels == 0
+        long_mask = color_labels == 1
+        plt.scatter(features_2d[short_mask, 0], features_2d[short_mask, 1],
+                    c='tab:blue', label="Short-Term", alpha=0.7)
+        plt.scatter(features_2d[long_mask, 0], features_2d[long_mask, 1],
+                    c='tab:red', label="Long-Term", alpha=0.7)
 
-        plt.title(f"Memory Visualization by Domain @ Step {step}")
+        plt.legend(loc="best")
+        plt.title(f"Support Data Visualization @ Step {step}")
         plt.xlabel("PCA Component 1")
         plt.ylabel("PCA Component 2")
         plt.grid(True)
-
-        plt.xlim(-1, 1)
+        plt.xlim(-1.0, 1.0)
         plt.ylim(-0.5, 0.5)
         plt.tight_layout()
 
-        # Save to file
-        vis_dir = os.path.join(self.cfg.OUTPUT_DIR, "memory_vis")
+        vis_dir = os.path.join(self.cfg.OUTPUT_DIR, "support_vis")
         os.makedirs(vis_dir, exist_ok=True)
-        vis_path = os.path.join(vis_dir, f"memory_vis_step_{step:05d}.png")
+        vis_path = os.path.join(vis_dir, f"support_vis_step_{step:05d}.png")
         plt.savefig(vis_path)
         plt.close()
+
 
     @torch.enable_grad()
     def forward_and_adapt(self, batch_data, model, optimizer, label):
@@ -271,14 +225,20 @@ class MyTTA(BaseAdapter):
 
         # Add each sample to memory as before
         for i, data in enumerate(batch_data):
-            self.short_term_memory.add_instance((data, pseudo_lbls[i].item(), entropy[i].item(), label['label'][i].item(), label['domain'][i].item()))
+            removed = self.short_term_memory.add_instance((data, pseudo_lbls[i].item(), entropy[i].item(), label['label'][i].item(), label['domain'][i].item()))
+            # if removed: 
+            #     self.long_term_memory.add_instance(removed.data, removed.label, removed.domain)
         
-        #### visualization
-        # self.show_mem_info()
-        # self.visualize_memory(self.short_term_memory, self.step)
+        # self.short_term_memory.show_memory_status()
+        # self.long_term_memory.show_memory_status()
 
         # Get the support data from shor-term memory
-        sup_data, _ = self.short_term_memory.get_sup_data(data_tensor, topk=self.cfg.ADAPTER.MYTTA.SEL_TOPK_BANKS) 
+        sup_data_short = self.short_term_memory.get_sup_data(data_tensor, topk=self.cfg.ADAPTER.MYTTA.STMEM_TOPK_CLUS) 
+        # sup_data_long = self.long_term_memory.get_sup_data(sup_data_short)
+        # self.visualize_support_data(sup_data_short, sup_data_long, self.step)
+        sup_data = sup_data_short
+
+        # Convert to tensors if needed
         sup_data = torch.stack(sup_data)
 
         # Get predictions from student and teacher models
